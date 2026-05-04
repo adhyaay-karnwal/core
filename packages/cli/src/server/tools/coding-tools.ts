@@ -583,6 +583,7 @@ async function handleAsk(
 		args,
 		workingDir,
 		logger,
+		agentName,
 	);
 
 	if (error) {

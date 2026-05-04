@@ -110,6 +110,7 @@ export const codingSpawnRoute: FastifyPluginAsync = async (app) => {
 			args,
 			body.dir,
 			gatewayLog,
+			body.agent,
 		);
 		if (error) {
 			deleteSession(sessionId);

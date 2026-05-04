@@ -75,6 +75,14 @@ final class VoiceController: NSObject, AVSpeechSynthesizerDelegate {
     /// (`isFinal=true`); we preserve what was already recognized and
     /// keep the mic alive until the caller explicitly stops.
     private var preservedPrefix: String = ""
+    /// The most recent raw transcript from the *current* recognition
+    /// task (without `preservedPrefix`). Used to detect when on-device
+    /// SFSpeechRecognizer rolls over to a new utterance mid-task: with
+    /// `addsPunctuation = true` the recognizer sometimes commits a
+    /// sentence at a pause and resets `bestTranscription.formattedString`
+    /// to just the new utterance — we detect that and promote the old
+    /// raw into `preservedPrefix` so we don't drop the earlier text.
+    private var lastRawInTask: String = ""
 
     // Target format for SFSpeechRecognizer — mono 16kHz Float32. Apple's
     // recognizer tolerates the device's native format on most Macs, but
@@ -245,17 +253,36 @@ final class VoiceController: NSObject, AVSpeechSynthesizerDelegate {
         }
 
         lastEmittedFinalText = ""
-        latestPartialText = ""
         hasEndAudioed = false
         hasDeliveredFinal = false
         if !internalRestart {
             preservedPrefix = ""
         }
+        // Seed latestPartialText with whatever we've already preserved so
+        // a stop()/error path that delivers `latestPartialText` before the
+        // new task emits its first partial doesn't drop the prefix.
+        latestPartialText = preservedPrefix
+        // Fresh task → no within-task raw yet.
+        lastRawInTask = ""
         stderrLog("creating recognition task (preservedPrefix=\(preservedPrefix.count) chars)")
         task = recognizer.recognitionTask(with: req) { [weak self] result, error in
             guard let self else { return }
             if let result {
                 let raw = result.bestTranscription.formattedString
+                // On-device SFSpeechRecognizer with `addsPunctuation` will
+                // sometimes commit a sentence at a pause and reset
+                // `formattedString` to *just* the new utterance — dropping
+                // earlier sentences from the visible transcript. We detect
+                // that here (new raw is shorter than what we last saw and
+                // shares almost no prefix with it) and promote the dropped
+                // text into `preservedPrefix` so the caller still sees
+                // everything.
+                if self.detectRollover(previous: self.lastRawInTask, new: raw) {
+                    let promoted = self.combineWithPrefix(self.lastRawInTask)
+                    stderrLog("recognizer rolled over within task — promoting \(promoted.count) chars to preservedPrefix")
+                    self.preservedPrefix = promoted
+                }
+                self.lastRawInTask = raw
                 let combined = self.combineWithPrefix(raw)
                 self.latestPartialText = combined
                 if result.isFinal {
@@ -268,6 +295,16 @@ final class VoiceController: NSObject, AVSpeechSynthesizerDelegate {
                         // preserve what we have and start a fresh task
                         // so they can keep talking.
                         DispatchQueue.main.async {
+                            // The user may have released keys between the
+                            // recognizer firing isFinal and this dispatch
+                            // running. Re-check before reopening the mic —
+                            // otherwise we restart into silence and the
+                            // final is never delivered.
+                            if self.hasEndAudioed {
+                                stderrLog("recognizer isFinal mid-session, but user released — committing \(combined.count) chars")
+                                self.deliverFinalIfNeeded(combined)
+                                return
+                            }
                             stderrLog("recognizer isFinal mid-session — preserving \(combined.count) chars and restarting")
                             self.cancelListening()
                             self.preservedPrefix = combined
@@ -307,6 +344,14 @@ final class VoiceController: NSObject, AVSpeechSynthesizerDelegate {
                     // indicator stuck after the panel hid).
                     DispatchQueue.main.async {
                         let saved = self.latestPartialText
+                        // Same race as the isFinal branch: the user may
+                        // have released keys before this dispatch ran. If
+                        // so, commit instead of reopening the mic.
+                        if self.hasEndAudioed {
+                            stderrLog("recognizer no-speech, user released — committing \(saved.count) chars")
+                            self.deliverFinalIfNeeded(saved)
+                            return
+                        }
                         stderrLog("recognizer no-speech mid-session — preserving \(saved.count) chars and restarting")
                         self.cancelListening()
                         self.preservedPrefix = saved
@@ -317,6 +362,34 @@ final class VoiceController: NSObject, AVSpeechSynthesizerDelegate {
                 }
             }
         }
+    }
+
+    /// True when SFSpeechRecognizer appears to have committed the
+    /// previous utterance and started a new one within the same task —
+    /// i.e. `new` is materially different from `previous` rather than a
+    /// continuation or a word-level revision.
+    ///
+    /// Heuristic:
+    /// - require the previous raw to be substantial (≥8 chars), because
+    ///   short partials are usually just the recognizer revising its
+    ///   guess (e.g. "Hi" → "Hey")
+    /// - new must be shorter than previous (a rollover restarts from a
+    ///   short fragment; a revision tends to keep or grow length)
+    /// - longest common prefix must be tiny (revisions almost always
+    ///   share most of the leading text; rollovers don't)
+    private func detectRollover(previous: String, new: String) -> Bool {
+        if previous.count < 8 { return false }
+        if new.isEmpty { return false }
+        if new.count >= previous.count { return false }
+        if new.hasPrefix(previous) { return false }   // pure continuation
+        if previous.hasPrefix(new) { return false }   // backward revision
+        let prevChars = Array(previous)
+        let newChars = Array(new)
+        var lcp = 0
+        while lcp < prevChars.count && lcp < newChars.count && prevChars[lcp] == newChars[lcp] {
+            lcp += 1
+        }
+        return lcp < 3
     }
 
     /// Join a new task's raw transcript onto whatever we preserved from

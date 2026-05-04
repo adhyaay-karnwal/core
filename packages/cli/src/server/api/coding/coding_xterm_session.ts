@@ -91,6 +91,7 @@ function tryRespawn(
 		args,
 		meta.dir,
 		gatewayLog,
+		meta.agent,
 	);
 	if (error) {
 		gatewayLog(`xterm resume FAILED: ${error}`);

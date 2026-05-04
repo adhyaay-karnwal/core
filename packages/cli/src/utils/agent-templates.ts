@@ -28,17 +28,13 @@ export const AGENT_TEMPLATES: AgentTemplate[] = [
 	{
 		name: 'codex-cli',
 		commands: ['codex'],
+		// codex 0.118+ split root-level vs `exec`-only flags: `--color` and
+		// `--skip-git-repo-check` are now exec-only, so passing them at the
+		// root makes codex error and exit. The interactive Code tab uses the
+		// root command (no subcommand on new, `resume` on resume).
 		defaultConfig: {
-			args: ['--color', 'never', '--sandbox', 'read-only', '--skip-git-repo-check'],
-			resumeArgs: [
-				'resume',
-				'{sessionId}',
-				'--color',
-				'never',
-				'--sandbox',
-				'read-only',
-				'--skip-git-repo-check',
-			],
+			args: [],
+			resumeArgs: ['resume', '{sessionId}'],
 			sessionMode: 'existing',
 			modelArg: '--model',
 			imageArg: '--image',
