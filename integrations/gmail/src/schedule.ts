@@ -70,6 +70,16 @@ function toGmailTimestamp(isoDate: string): number {
 }
 
 /**
+ * Trim cleaned email body to a short single-line preview suitable for the
+ * activity feed. Full body is retrievable via the read_email MCP tool.
+ */
+function makeSnippet(content: string, max = 200): string {
+  const flat = content.replace(/\s+/g, ' ').trim();
+  if (flat.length <= max) return flat;
+  return `${flat.slice(0, max)}…`;
+}
+
+/**
  * Fetch and process received emails
  */
 async function processReceivedEmails(
@@ -121,26 +131,16 @@ async function processReceivedEmails(
         const threadId = fullMessage.data.threadId || '';
         const { textContent, htmlContent } = parseEmailContent(fullMessage.data.payload);
 
-        // Clean and convert email content to markdown
         const cleanedContent = cleanEmailContent(htmlContent, textContent);
 
-        // Skip if no meaningful content
         if (!cleanedContent || cleanedContent.length < 10) {
           continue;
         }
 
-        // Create Gmail web URL
         const sourceURL = `https://mail.google.com/mail/u/0/#inbox/${message.id}`;
+        const snippet = makeSnippet(cleanedContent);
 
-        // Format activity text with full email content as markdown
-        const text = `## 📧 Email from ${sender}
-
-**From:** ${from}
-**Subject:** ${subject}
-**Date:** ${date}
-**Thread ID:** ${threadId}
-
-${cleanedContent}`;
+        const text = `Received email from ${sender} (from: ${from}, subject: "${subject}", message_id: ${message.id}, thread_id: ${threadId}) at ${date}. Snippet: "${snippet}"`;
 
         activities.push(
           createActivityMessage({
@@ -211,27 +211,16 @@ async function processSentEmails(
         const threadId = fullMessage.data.threadId || message.id;
         const { textContent, htmlContent } = parseEmailContent(fullMessage.data.payload);
 
-        // Clean and convert email content to markdown
         const cleanedContent = cleanEmailContent(htmlContent, textContent);
 
-        // Skip if no meaningful content
         if (!cleanedContent || cleanedContent.length < 10) {
           continue;
         }
 
-        // Create Gmail web URL
         const sourceURL = `https://mail.google.com/mail/u/0/#sent/${message.id}`;
+        const snippet = makeSnippet(cleanedContent);
 
-        // Format activity text with full email content as markdown
-        const text = `## 📤 Sent to ${to}
-
-**From:** ${emailAddress}
-**To:** ${to}
-**Subject:** ${subject}
-**Date:** ${date}
-**Thread ID:** ${threadId}
-
-${cleanedContent}`;
+        const text = `Sent email to ${to} (from: ${emailAddress}, subject: "${subject}", message_id: ${message.id}, thread_id: ${threadId}) at ${date}. Snippet: "${snippet}"`;
 
         activities.push(
           createActivityMessage({
