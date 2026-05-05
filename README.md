@@ -53,9 +53,9 @@
 ---
 
 > You use specialized agents like Claude Code and Cursor. You gather the context, kick off
-> the session, babysit the output. You're the context middleman and that makes you the
-> bottleneck. CORE gathers the context, runs the agents, coordinates the work,
-> and only pulls you back in when judgment is needed. You stop babysitting. You delegate.
+> the session, and babysit the output. You're the bottleneck. CORE gathers the context,
+> runs the agents, coordinates the work, and only pulls you back in when judgment is needed.
+> You stop babysitting. You delegate.
 
 Watch CORE handle two coding tasks end to end:
 
@@ -67,21 +67,23 @@ Watch CORE handle two coding tasks end to end:
 
 ### You're operating, not delegating.
 
-Right now you are the glue. You read the GitHub issue, gather Slack context, check error logs, paste it all into Claude Code, watch it run, step in when it gets stuck. That's not delegating. That's operating an agent yourself. Every workflow starts with you. Every session needs you to explain things from scratch.
+Right now you're the glue. You read the GitHub issue, gather Slack context, check logs, paste it into Claude Code, watch it run, and step in when it gets stuck. That's not delegating. That's operating an agent yourself.
 
-The reason you can't actually delegate today: every agent starts fresh. No persistent memory, no shared source of truth across your tools, no judgment about what should run when. So you stay in the loop on every single thing.
+Why? Every agent starts fresh. No persistent memory, no shared source of truth across your tools, no judgment about what should run when. So you stay in the loop for every task.
 
 ### Where this is going.
 
-AI is moving from prompt-and-wait to delegate-and-review. As models get better, the leverage stops being model quality and starts being delegation quality — how much you can hand off, how clean the brief is, how reliably the work comes back. The next valuable layer in this stack isn't another coding agent. It's the layer above them: one that gathers context, decides what should run, and owns the task until human judgment is needed.
+AI is moving from prompt-and-wait to delegate-and-review. As models improve, leverage comes less from model quality and more from delegation quality: how much you can hand off, how clear the brief is, and how reliably the work comes back.
 
-That layer needs three things no individual agent has: persistent memory across tasks, connectors that span the tools your work actually lives in, and the judgment to coordinate without asking permission for every step.
+The next layer isn't another coding agent. It's the layer above them: one that gathers context, decides what should run, and owns the task until human judgment is needed.
+
+That layer needs three things individual agents don't have: persistent memory across tasks, connectors across the tools where work lives, and the judgment to coordinate without asking permission at every step.
 
 ### How CORE helps.
 
-CORE is that layer. You write what needs doing on a scratchpad — a shared page where tasks, thoughts, and half-formed ideas live. CORE reads it alongside you, picks up what's meant for it, gathers context from connected apps and a persistent memory graph, drafts a plan, runs the work through claude code or codex, handles blockers on its own where it can, and only pulls you back in when judgment is actually needed.
+CORE is that layer. You write what needs doing on a scratchpad, a shared page for tasks, ideas, and work in progress. CORE reads it with you, picks up what's meant for it, gathers context from connected apps and memory, drafts a plan, runs the work through Claude Code or Codex, handles blockers where it can, and only pulls you back in when judgment is needed.
 
-Some tasks are one-shot. Others are recurring or event-triggered — set up once, left to run. Either way, the loop is the same: you write the task, CORE owns it end to end, you review.
+Some tasks are one-shot. Others are recurring or event-triggered. Either way, the loop is the same: you write the task, CORE owns it end to end, you review.
 
 ---
 
@@ -89,49 +91,49 @@ Some tasks are one-shot. Others are recurring or event-triggered — set up once
 
 | | |
 |---|---|
-| **Scratchpad** | A daily page for tasks, ideas, and work-in-progress. Type `[ ]` anywhere on it and CORE picks it up within 3 minutes — the fastest path to delegating work without switching contexts. Also a place for your daily log and half-formed thinking. |
-| **Tasks** | One-shot or recurring work units. Each task carries a spec you write, a plan CORE adds before executing, a live state, and a sidebar for chatting with CORE about that specific work. Per task, CORE can spawn multiple coding and browser sessions to get things done. |
-| **Memory** | A temporal knowledge graph that learns from your conversations inside the app, your coding sessions, and any app you've connected as a memory source. Stores episodes, entities, and atomic facts — preferences, decisions, goals, directives — retrieved via hybrid search (vector + BM25 + graph traversal). Every task CORE runs starts with your full context already loaded. |
-| **Connectors** | 50+ apps via a single MCP endpoint — GitHub, Linear, Jira, Slack, Gmail, Calendar, Sentry, Granola, Todoist, and more. Two modes: MCP tools for on-demand actions and information, and webhook-based triggers for proactive automation. When a Granola meeting ends, CORE reads the transcript, creates action items, and presents them as tasks — without being asked. |
-| **Skills** | A library of 100+ reusable instructions CORE applies automatically based on context. Use built-in skills or write your own to encode workflows specific to your team or project. |
-| **Gateway** | Runs Claude Code, Codex, or any connected coding agent on your machine or in a Docker / Railway sandbox — so CORE keeps working when your laptop is closed. Reachable via Slack, WhatsApp, Telegram, email, or web dashboard, so you can delegate, check status, and unblock from anywhere. |
-| **Model agnostic** | Bring your own provider — Anthropic, OpenAI, or any open-weight model. Self-host the full stack for complete isolation. |
+| **Scratchpad** | A daily page for tasks, ideas, and work in progress. Type `[ ]` anywhere and CORE picks it up within 3 minutes. |
+| **Tasks** | One-shot or recurring work units with your spec, CORE's plan, live state, and a dedicated chat thread. Each task can spawn multiple coding or browser sessions. |
+| **Memory** | A temporal knowledge graph built from your conversations, coding sessions, and connected apps. It stores preferences, decisions, goals, and directives so every task starts with context loaded. |
+| **Connectors** | 50+ apps through one MCP endpoint, plus webhook triggers for proactive automation. GitHub, Linear, Jira, Slack, Gmail, Calendar, Sentry, Granola, Todoist, and more. |
+| **Skills** | 100+ reusable instructions applied automatically based on context. Use built-in skills or write your own for team-specific workflows. |
+| **Gateway** | Runs Claude Code, Codex, or other coding agents on your machine or in Docker / Railway, so CORE keeps working when your laptop is closed. Accessible via Slack, WhatsApp, Telegram, email, or web. |
+| **Model agnostic** | Bring your own provider: Anthropic, OpenAI, or open-weight models. Self-host the full stack for full isolation. |
 
 ---
 
 ## CORE in action
 
-Five types of work worth delegating to CORE. Each removes a different kind of babysitting.
+Five types of work worth delegating to CORE.
 
 ### Delegate a coding task, come back to a PR.
 
-Tell CORE what needs doing. It gathers context from your repo, connected apps, and memory, drafts a plan, runs a Claude Code session, handles blockers on its own where it can, and brings back a PR. You review when it's done — you never watch it run.
+Tell CORE what needs doing. It gathers context from your repo, apps, and memory, drafts a plan, runs a Claude Code session, handles blockers where it can, and brings back a PR. You review when it's done.
 
 `[ ] Fix the race condition in the checkout flow from issue #312` — CORE loaded the context, spun up a session, and opened the PR. You came back to a diff.
 
 ### Clear your backlog while you sleep.
 
-Set a recurring task to pull from your backlog at a set time. CORE works through it while you're offline. Sessions that went smoothly are waiting for review in the morning. For anything that got stuck, CORE surfaces exactly what it needs from you — a direction, a quick decision — instead of leaving you to reconstruct the whole thread.
+Set a recurring task to pull from your backlog at a set time. CORE works through it while you're offline. Smooth runs are waiting for review in the morning. If something gets stuck, CORE comes back with the one decision it needs.
 
 `[ ] Work through tonight's backlog starting at 11pm` — you wrote that once. PRs and status updates wait every morning. Stuck sessions come back with a tight question, not a stalled tab.
 
 ### Automate monitoring. Get pinged only when it matters.
 
-Set a recurring task to watch Sentry, your logs, or any alert source. When something fires, CORE investigates — runs a Claude Code session in the background, pulls related traces and prior incidents, and decides whether to handle it or escalate. Most alerts resolve without you touching them.
+Set a recurring task to watch Sentry, your logs, or any alert source. When something fires, CORE investigates, pulls related traces and prior incidents, and decides whether to handle it or escalate.
 
 A Sentry alert fires at 2am. CORE investigates, suggests the fix, and pings on Slack: *"Issue #847 — fix proposed, awaiting your review."* You approve from your phone. Done.
 
 ### Stay current without reading everything.
 
-Set a recurring task to pull what matters from the sources you follow — Hacker News, Reddit, the blogs and newsletters in your feed — and deliver a short digest on a schedule you define. You pick the topics, CORE does the reading.
+Set a recurring task to pull what matters from the sources you follow and deliver a short digest on your schedule. You pick the topics, CORE does the reading.
 
 A digest lands in Slack every morning: top HN threads, relevant AI papers, a summary of what moved in the repos you watch. Set up once, runs every day.
 
 ### Automate app work. Delegate from wherever you are.
 
-Routine work in your connected apps — updating Linear issues, triaging PRs, getting a digestible summary of what's been assigned for review — runs as recurring tasks on a schedule. When something urgent comes up away from your desk, create a task from WhatsApp or Slack. The gateway keeps running in a Docker or Railway sandbox, so CORE picks it up immediately without your laptop.
+Routine work in connected apps like updating Linear issues, triaging PRs, or summarising assigned reviews runs as recurring tasks. When something urgent comes up away from your desk, create a task from WhatsApp or Slack. The gateway keeps running in Docker or Railway, so CORE picks it up without your laptop.
 
-A PR lands for review. CORE summarises the diff, flags the change worth scrutinising, and asks whether to approve. You reply on Slack. Meanwhile, `[ ] Ship the auth refactor` — sent from WhatsApp at the airport — is already running in a Railway sandbox. Your laptop stayed closed.
+A PR lands for review. CORE summarises the diff, flags the change worth scrutinising, and asks whether to approve. You reply on Slack. Meanwhile, `[ ] Ship the auth refactor` — sent from WhatsApp at the airport — is already running in a Railway sandbox.
 
 ---
 
@@ -139,7 +141,7 @@ A PR lands for review. CORE summarises the diff, flags the change worth scrutini
 
 | | |
 |---|---|
-| **Not a RAG wrapper.** | Memory isn't "embed chunks and search." It's a temporal knowledge graph where facts are classified, connected, and updated over time. It knows *when* you decided something and *why*. |
+| **Not a RAG wrapper.** | Memory isn't just embedded chunks. It's a temporal knowledge graph that tracks what you decided, when, and why. |
 | **Not a workflow builder.** | No drag-and-drop. You write what needs doing. CORE figures out the workflow. |
 | **Not another Devin.** | CORE proposes plans, you approve. CORE asks for unblocks, you decide. CORE brings back PRs, you review. Agents don't merge on their own. |
 
@@ -147,7 +149,7 @@ A PR lands for review. CORE summarises the diff, flags the change worth scrutini
 
 ## Quickstart
 
-Open source, self-hosted. Your data never leaves your infra.
+Open source and self-hosted. Your data stays in your infra.
 
 **One step:**
 
@@ -155,17 +157,17 @@ Open source, self-hosted. Your data never leaves your infra.
 npm install -g @redplanethq/corebrain && corebrain setup
 ```
 
-That's it. The wizard asks for an install dir, an AI provider, an API key, and a chat model — then auto-generates secrets, brings the stack up, and opens at `http://localhost:3033`.
+The wizard asks for an install dir, AI provider, API key, and chat model, then generates secrets, brings the stack up, and opens `http://localhost:3033`.
 
 **Or one click on Railway:**
 
 [![Deploy on Railway](https://railway.app/button.svg)](https://railway.com/deploy/core)
 
-**Connect a gateway** (laptop, Docker host, or Railway) so CORE can drive your browser, run coding agents, and touch local folders:
+**Connect a gateway** (laptop, Docker host, or Railway) so CORE can drive your browser, run coding agents, and access local folders:
 
 ```bash
-corebrain login              # point at https://app.getcore.me or your self-hosted URL
-corebrain gateway setup      # pick native | docker | railway
+corebrain login
+corebrain gateway setup
 ```
 
 **Requirements:** Docker 20.10+, Docker Compose 2.20+, 4 vCPU / 8GB RAM
@@ -178,7 +180,7 @@ corebrain gateway setup      # pick native | docker | railway
 
 ## Benchmark
 
-CORE achieves **88.24%** average accuracy on the [LoCoMo benchmark](https://github.com/RedPlanetHQ/core-benchmark) — single-hop, multi-hop, open-domain, and temporal reasoning.
+CORE achieves **88.24%** average accuracy on the [LoCoMo benchmark](https://github.com/RedPlanetHQ/core-benchmark) across single-hop, multi-hop, open-domain, and temporal reasoning.
 
 ---
 
@@ -211,7 +213,7 @@ Want to understand how CORE works under the hood?
 
 ## Community
 
-We're building the future of personal AI in the open. Come build with us.
+We're building personal AI in the open.
 
 - [Discord](https://discord.gg/YGUZcvDjUa) — questions, ideas, show-and-tell
 - [CONTRIBUTING.md](CONTRIBUTING.md) — how to set up and send a PR
