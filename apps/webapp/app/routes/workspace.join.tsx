@@ -19,11 +19,7 @@ import { Button } from "~/components/ui";
 import { Input } from "~/components/ui/input";
 import { requireUserId } from "~/services/session.server";
 import { typedjson } from "remix-typedjson";
-import { prisma } from "~/db.server";
-import { ensureBillingInitialized } from "~/services/billing.server";
-import { ensureDefaultProviders } from "~/services/llm-provider.server";
-import { LabelService } from "~/services/label.server";
-import { logger } from "~/services/logger.service";
+import { createWorkspace } from "~/models/workspace.server";
 import { saveSession } from "~/services/sessionStorage.server";
 import { redirect } from "@remix-run/node";
 import Logo from "~/components/logo/logo";
@@ -48,51 +44,12 @@ export async function action({ request }: ActionFunctionArgs) {
   const { workspaceName } = submission.value;
 
   try {
-    // Generate slug: remove spaces, lowercase, add 5 random letters
-    const generateRandomSuffix = () => {
-      const chars = "abcdefghijklmnopqrstuvwxyz";
-      return Array.from(
-        { length: 5 },
-        () => chars[Math.floor(Math.random() * chars.length)],
-      ).join("");
-    };
-
-    const slug =
-      workspaceName.replace(/\s+/g, "-").toLowerCase() + generateRandomSuffix();
-
-    const workspace = await prisma.workspace.create({
-      data: {
-        slug,
-        name: workspaceName,
-        version: "V3",
-        UserWorkspace: {
-          create: {
-            userId,
-          },
-        },
-      },
+    const workspace = await createWorkspace({
+      name: workspaceName,
+      integrations: [],
+      userId,
     });
 
-    await ensureBillingInitialized(workspace.id, userId);
-    await ensureDefaultProviders();
-
-    // Create persona document and label
-    try {
-      const labelService = new LabelService();
-
-      await labelService.createLabel({
-        name: "Persona",
-        workspaceId: workspace.id,
-        color: "#8B5CF6",
-        description: "Personal persona generated from your episodes",
-      });
-
-      logger.info(`Created persona label for workspace ${workspace.id}`);
-    } catch (e) {
-      logger.error(`Error creating persona label: ${e}`);
-    }
-
-    // Update session with new workspaceId and redirect
     const headers = await saveSession(request, {
       userId,
       workspaceId: workspace.id,

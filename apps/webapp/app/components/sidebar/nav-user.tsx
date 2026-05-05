@@ -24,6 +24,7 @@ import { Button } from "../ui";
 import { useNavigate, useFetcher } from "@remix-run/react";
 import { type ExtendedUser } from "~/hooks/useUser";
 import Avatar from "boring-avatars";
+import { useEffect, useRef } from "react";
 
 export function NavUser({
   user,
@@ -37,13 +38,22 @@ export function NavUser({
   const { isMobile } = useSidebar();
   const navigate = useNavigate();
   const fetcher = useFetcher();
+  const isSwitchingRef = useRef(false);
 
   const handleSwitchWorkspace = (workspaceId: string) => {
+    isSwitchingRef.current = true;
     fetcher.submit(
       { workspaceId, redirectTo: "/" },
       { method: "POST", action: "/api/v1/workspace/switch" },
     );
   };
+
+  useEffect(() => {
+    if (isSwitchingRef.current && fetcher.state === "idle") {
+      isSwitchingRef.current = false;
+      window.location.assign("/");
+    }
+  }, [fetcher.state]);
 
   return (
     <DropdownMenu>
