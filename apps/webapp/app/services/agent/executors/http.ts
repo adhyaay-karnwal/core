@@ -103,19 +103,17 @@ export class HttpOrchestratorTools extends OrchestratorTools {
     return await callTool(gatewayId, toolName, params, 60000);
   }
 
-  async getSkill(skillId: string, _workspaceId: string): Promise<string> {
+  async getSkill(skillId: string, workspaceId: string): Promise<string> {
     try {
-      const response = await this.client.getSkill({ skillId });
-      if (!response.skill) return "Skill not found";
-      const skill = response.skill as any;
-      return `## Skill: ${skill.title ?? ""}\n\n${skill.content ?? ""}`;
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      logger.warn("HttpOrchestratorTools: failed to load skill", {
-        skillId,
-        error: msg,
+      const skill = await prisma.document.findFirst({
+        where: { id: skillId, workspaceId, type: "skill", deleted: null },
+        select: { id: true, title: true, content: true },
       });
-      return `Failed to load skill: ${msg}`;
+      if (!skill) return "Skill not found";
+      return `## Skill: ${skill.title}\n\n${skill.content}`;
+    } catch (error) {
+      logger.warn("HttpOrchestratorTools: failed to load skill", { error });
+      return "Failed to load skill";
     }
   }
 

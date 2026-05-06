@@ -203,8 +203,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/gateway-protocol
       '@redplanethq/sdk':
-        specifier: 0.1.19
-        version: 0.1.19
+        specifier: 0.1.21
+        version: 0.1.21
       '@redplanethq/ui':
         specifier: ^2.1.0
         version: 2.1.0(@types/react-dom@19.2.3(@types/react@19.2.13))(@types/react@19.2.13)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
@@ -5315,8 +5315,8 @@ packages:
     resolution: {integrity: sha512-RmPfT9XESjTSMLlAMkolZEF28PvGo5hlwrG75JQy1tAZkvaTHzC7A2mEAMbsBvOMrJuUztL3NtCmVF//C/C/+A==}
     engines: {node: '>=18.0.0'}
 
-  '@redplanethq/sdk@0.1.19':
-    resolution: {integrity: sha512-PCYfHMd9WM25pgYo3PhDdUHFrpv3UbzuuIstmCrc4nRfKymfdtWfogYUFov3PmGmz2xDf9PTCRMbxgtyRRK6LA==}
+  '@redplanethq/sdk@0.1.21':
+    resolution: {integrity: sha512-9mXCt/46NcCCxa9b6dZ2Q0Gf7dW9DzRTUA++w/2szybvHFFLBQZr9PzjFlan73zFzhqeSPiWbI8zBGVLmIFrBA==}
     engines: {node: '>=18.0.0'}
 
   '@redplanethq/ui@2.1.0':
@@ -21144,7 +21144,7 @@ snapshots:
     dependencies:
       commander: 14.0.0
 
-  '@redplanethq/sdk@0.1.19':
+  '@redplanethq/sdk@0.1.21':
     dependencies:
       commander: 14.0.0
       zod: 3.25.76
