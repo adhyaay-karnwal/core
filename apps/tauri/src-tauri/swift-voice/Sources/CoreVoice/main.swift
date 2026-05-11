@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import CoreAudio
 import Speech
 
 // MARK: - Newline-delimited JSON protocol over stdin/stdout
@@ -104,9 +105,58 @@ final class VoiceController: NSObject, AVSpeechSynthesizerDelegate {
     /// when the user picks a voice in Settings. nil = pick automatically.
     private var preferredVoiceIdentifier: String?
 
+    /// Observer for `AVAudioEngineConfigurationChange` — fires when the
+    /// audio route changes (headphones plugged in/out, AirPods connecting,
+    /// default input device switching). Apple auto-stops the engine when
+    /// this fires; we must reinstall the tap with the *new* input format
+    /// and restart, otherwise buffers either stop flowing or arrive in a
+    /// format the previously-built `AVAudioConverter` can't parse and the
+    /// recognizer goes silent.
+    private var configChangeObserver: NSObjectProtocol?
+
+    /// Audio device ID we explicitly pinned the engine's input node to at
+    /// `startListening` time — i.e. whatever the system default input was
+    /// the moment the user pressed the hotkey. We hold this device for
+    /// the rest of the listening session and ignore macOS's attempts to
+    /// re-route us mid-session.
+    ///
+    /// Why: AirPods Max and other Bluetooth headsets cause macOS to
+    /// silently swap the default input device when other audio activity
+    /// changes (e.g., Spotify pausing makes macOS try to put AirPods into
+    /// HFP/SCO mic mode, which is broken on recent macOS). Without
+    /// pinning, our engine follows that swap and ends up bound to a
+    /// half-working HFP device. Pinning to "whatever was default at
+    /// hotkey-press time" keeps dictation on the device the user was
+    /// effectively choosing when they triggered the widget.
+    ///
+    /// `kAudioObjectUnknown` = not pinned (engine follows system default).
+    private var pinnedInputDeviceID: AudioDeviceID = AudioDeviceID(kAudioObjectUnknown)
+
+    /// Debounces the route-change rebuild. AirPods reconnect (and other
+    /// BT profile renegotiations) post 3-4 `AVAudioEngineConfigurationChange`
+    /// notifications back-to-back. Acting on each one risks tearing down
+    /// a freshly-started engine from a previous rebuild that's still
+    /// settling. We coalesce: every notification cancels the previous
+    /// pending rebuild and re-schedules ~150ms out, so the rebuild fires
+    /// once after the flurry quiets down.
+    private var pendingRouteRebuild: DispatchWorkItem?
+
     override init() {
         super.init()
         synthesizer.delegate = self
+        configChangeObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange,
+            object: audioEngine,
+            queue: .main
+        ) { [weak self] _ in
+            self?.scheduleRouteRebuild()
+        }
+    }
+
+    deinit {
+        if let obs = configChangeObserver {
+            NotificationCenter.default.removeObserver(obs)
+        }
     }
 
     // -------- permissions --------
@@ -182,73 +232,30 @@ final class VoiceController: NSObject, AVSpeechSynthesizerDelegate {
         }
         request = req
 
+        // Pin the engine's input to whatever the system thinks is the
+        // default input device *right now* — i.e. the device the user
+        // implicitly chose when they pressed the hotkey. We hold this
+        // device for the whole session so a mid-session route change
+        // (e.g. AirPods Max swapping into HFP when Spotify pauses)
+        // can't yank the mic out from under the recognizer. Only on a
+        // fresh user-triggered start (not internal recognizer restarts)
+        // do we re-snapshot the default.
+        if !internalRestart {
+            if let dev = currentDefaultInputDevice() {
+                pinnedInputDeviceID = dev
+                stderrLog("pinning input to system default device id=\(dev) for this session")
+            } else {
+                pinnedInputDeviceID = AudioDeviceID(kAudioObjectUnknown)
+                stderrLog("no default input device — falling back to engine's automatic selection")
+            }
+        }
+        applyPinnedInputDevice()
+
         // NOTE: deliberately not calling setVoiceProcessingEnabled —
         // it inserts AEC reference channels into the buffer that the
         // recognizer can't parse. We instead convert whatever the
         // device gives us into mono 16kHz Float32 in the tap callback.
-        let inputNode = audioEngine.inputNode
-        let inputFormat = inputNode.outputFormat(forBus: 0)
-        stderrLog("input format: \(inputFormat)")
-        stderrLog("recognition format: \(recognitionFormat)")
-        converter = AVAudioConverter(from: inputFormat, to: recognitionFormat)
-        if converter == nil {
-            stderrLog("AVAudioConverter init FAILED for these formats")
-        }
-        let conv = converter
-        let recogFormat = recognitionFormat
-        inputNode.removeTap(onBus: 0)
-        var bufferCount = 0
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: inputFormat) { [weak self] inputBuffer, _ in
-            guard let self else { return }
-            bufferCount &+= 1
-            if bufferCount == 1 {
-                stderrLog("first audio buffer received (\(inputBuffer.frameLength) frames, \(inputBuffer.format.channelCount)ch)")
-            } else if bufferCount % 200 == 0 {
-                stderrLog("audio buffers delivered: \(bufferCount)")
-            }
-
-            guard let conv else {
-                self.request?.append(inputBuffer)
-                return
-            }
-
-            // Convert to mono 16kHz Float32 before feeding the recognizer.
-            let outCapacity = AVAudioFrameCount(
-                Double(inputBuffer.frameLength)
-                    * recogFormat.sampleRate
-                    / inputBuffer.format.sampleRate
-                    + 32
-            )
-            guard let outBuffer = AVAudioPCMBuffer(pcmFormat: recogFormat, frameCapacity: outCapacity) else {
-                return
-            }
-
-            var hasProvided = false
-            var error: NSError?
-            let status = conv.convert(to: outBuffer, error: &error) { _, outStatus in
-                if hasProvided {
-                    outStatus.pointee = .noDataNow
-                    return nil
-                }
-                hasProvided = true
-                outStatus.pointee = .haveData
-                return inputBuffer
-            }
-            if status == .error {
-                if let error, bufferCount % 200 == 1 {
-                    stderrLog("audio convert error: \(error.localizedDescription)")
-                }
-                return
-            }
-            self.request?.append(outBuffer)
-        }
-
-        audioEngine.prepare()
-        do {
-            try audioEngine.start()
-            stderrLog("audio engine started, running=\(audioEngine.isRunning)")
-        } catch {
-            emitError("audio engine failed: \(error.localizedDescription)")
+        if !installTapAndStartEngine() {
             return
         }
 
@@ -439,6 +446,8 @@ final class VoiceController: NSObject, AVSpeechSynthesizerDelegate {
         stderrLog("cancelListening")
         fallbackFinalWorkItem?.cancel()
         fallbackFinalWorkItem = nil
+        pendingRouteRebuild?.cancel()
+        pendingRouteRebuild = nil
         hasDeliveredFinal = true // suppress any late callback
         task?.cancel()
         task = nil
@@ -448,6 +457,15 @@ final class VoiceController: NSObject, AVSpeechSynthesizerDelegate {
         if audioEngine.isRunning {
             audioEngine.stop()
         }
+        // Note: we deliberately do NOT clear pinnedInputDeviceID here.
+        // The recognizer's no-speech / mid-task-isFinal paths call
+        // cancelListening() and immediately re-enter via
+        // startListening(internalRestart: true) — clearing the pin would
+        // make the internal restart fall back to the (now-flapping)
+        // system default and undo the entire fix. The pin gets refreshed
+        // by the `if !internalRestart` block in startListening on the
+        // next user-triggered session, which is the only place a
+        // "fresh" pin matters.
     }
 
     private func armFinalFallback() {
@@ -460,6 +478,250 @@ final class VoiceController: NSObject, AVSpeechSynthesizerDelegate {
         }
         fallbackFinalWorkItem = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.8, execute: work)
+    }
+
+    /// Read the system default *input* device ID via Core Audio.
+    /// Returns nil if there is no input device or the query fails.
+    private func currentDefaultInputDevice() -> AudioDeviceID? {
+        var deviceID = AudioDeviceID(kAudioObjectUnknown)
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        let status = AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address,
+            0,
+            nil,
+            &size,
+            &deviceID
+        )
+        if status != noErr || deviceID == AudioDeviceID(kAudioObjectUnknown) {
+            stderrLog("AudioObjectGetPropertyData(DefaultInputDevice) failed status=\(status)")
+            return nil
+        }
+        return deviceID
+    }
+
+    /// Returns true if a previously-snapshotted device ID still refers to
+    /// a device that exists on the system (i.e. wasn't unplugged).
+    private func deviceStillExists(_ id: AudioDeviceID) -> Bool {
+        if id == AudioDeviceID(kAudioObjectUnknown) { return false }
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDevices,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var size: UInt32 = 0
+        let szStatus = AudioObjectGetPropertyDataSize(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address,
+            0,
+            nil,
+            &size
+        )
+        if szStatus != noErr { return false }
+        let count = Int(size) / MemoryLayout<AudioDeviceID>.size
+        if count == 0 { return false }
+        var devices = [AudioDeviceID](repeating: AudioDeviceID(kAudioObjectUnknown), count: count)
+        let status = AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address,
+            0,
+            nil,
+            &size,
+            &devices
+        )
+        if status != noErr { return false }
+        return devices.contains(id)
+    }
+
+    /// Force the input node's underlying AUHAL audio unit to capture from
+    /// `pinnedInputDeviceID`, overriding whatever macOS picked as the
+    /// default. No-op when the pin is unknown (we let the engine pick).
+    ///
+    /// Important: `kAudioOutputUnitProperty_CurrentDevice` can only be
+    /// set when the AU is uninitialized. After the first
+    /// `audioEngine.start()`, the AU stays initialized through
+    /// subsequent stops — so on the route-change path we MUST call
+    /// `AudioUnitUninitialize` first or the property set silently fails
+    /// with `kAudioUnitErr_Initialized` (-10851) and the pin is lost.
+    /// The AU gets re-initialized when `audioEngine.prepare()` runs.
+    private func applyPinnedInputDevice() {
+        guard pinnedInputDeviceID != AudioDeviceID(kAudioObjectUnknown) else {
+            return
+        }
+        guard let auInput = audioEngine.inputNode.audioUnit else {
+            stderrLog("inputNode.audioUnit is nil — cannot pin device")
+            return
+        }
+
+        // Uninitialize is idempotent (no-op if already uninitialized);
+        // we don't bother checking the return code.
+        AudioUnitUninitialize(auInput)
+
+        var dev = pinnedInputDeviceID
+        let status = AudioUnitSetProperty(
+            auInput,
+            kAudioOutputUnitProperty_CurrentDevice,
+            kAudioUnitScope_Global,
+            0,
+            &dev,
+            UInt32(MemoryLayout<AudioDeviceID>.size)
+        )
+        if status != noErr {
+            stderrLog("AudioUnitSetProperty(CurrentDevice=\(dev)) failed status=\(status) (0x\(String(status, radix: 16)))")
+        } else {
+            stderrLog("input pinned to device id=\(dev)")
+        }
+    }
+
+    /// Install the input tap with the device's *current* format, build a
+    /// matching converter, and start the engine. Factored out of
+    /// `startListening` so the route-change handler can rebuild the tap
+    /// without tearing down the active recognition request/task.
+    /// Returns false if the input format is unusable (e.g. the device is
+    /// transitioning between routes and reports a zero format) — caller
+    /// can rely on the configuration-change notification to retry.
+    @discardableResult
+    private func installTapAndStartEngine() -> Bool {
+        let inputNode = audioEngine.inputNode
+        let inputFormat = inputNode.outputFormat(forBus: 0)
+        stderrLog("input format: \(inputFormat)")
+        stderrLog("recognition format: \(recognitionFormat)")
+
+        // During a route change (headphones plugging in/out, AirPods
+        // switching to HFP) the input node briefly reports a zero format.
+        // Installing a tap with that crashes; building a converter from it
+        // returns nil and silently drops audio. Bail out — the
+        // configuration-change observer will fire again with a real format.
+        guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else {
+            stderrLog("input format invalid (sr=\(inputFormat.sampleRate) ch=\(inputFormat.channelCount)) — deferring tap install to next config change")
+            return false
+        }
+
+        converter = AVAudioConverter(from: inputFormat, to: recognitionFormat)
+        if converter == nil {
+            stderrLog("AVAudioConverter init FAILED for these formats")
+        }
+        let conv = converter
+        let recogFormat = recognitionFormat
+        inputNode.removeTap(onBus: 0)
+        var bufferCount = 0
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: inputFormat) { [weak self] inputBuffer, _ in
+            guard let self else { return }
+            bufferCount &+= 1
+            if bufferCount == 1 {
+                stderrLog("first audio buffer received (\(inputBuffer.frameLength) frames, \(inputBuffer.format.channelCount)ch)")
+            } else if bufferCount % 200 == 0 {
+                stderrLog("audio buffers delivered: \(bufferCount)")
+            }
+
+            guard let conv else {
+                self.request?.append(inputBuffer)
+                return
+            }
+
+            // Convert to mono 16kHz Float32 before feeding the recognizer.
+            let outCapacity = AVAudioFrameCount(
+                Double(inputBuffer.frameLength)
+                    * recogFormat.sampleRate
+                    / inputBuffer.format.sampleRate
+                    + 32
+            )
+            guard let outBuffer = AVAudioPCMBuffer(pcmFormat: recogFormat, frameCapacity: outCapacity) else {
+                return
+            }
+
+            var hasProvided = false
+            var error: NSError?
+            let status = conv.convert(to: outBuffer, error: &error) { _, outStatus in
+                if hasProvided {
+                    outStatus.pointee = .noDataNow
+                    return nil
+                }
+                hasProvided = true
+                outStatus.pointee = .haveData
+                return inputBuffer
+            }
+            if status == .error {
+                if let error, bufferCount % 200 == 1 {
+                    stderrLog("audio convert error: \(error.localizedDescription)")
+                }
+                return
+            }
+            self.request?.append(outBuffer)
+        }
+
+        audioEngine.prepare()
+        do {
+            try audioEngine.start()
+            stderrLog("audio engine started, running=\(audioEngine.isRunning)")
+            return true
+        } catch {
+            emitError("audio engine failed: \(error.localizedDescription)")
+            return false
+        }
+    }
+
+    /// Fired when macOS rebuilds the audio graph — typically because the
+    /// user plugged in headphones, AirPods connected/disconnected, or the
+    /// default input/output device changed. Apple has already stopped the
+    /// engine by the time we get here; we must re-query the (possibly
+    /// new) input format, rebuild the converter, reinstall the tap, and
+    /// restart. Skipped when we're not currently listening.
+    /// Coalesce a flurry of route-change notifications into a single
+    /// rebuild. Apple posts the notification on `.main`, so this runs
+    /// serialized — no lock needed.
+    private func scheduleRouteRebuild() {
+        pendingRouteRebuild?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.pendingRouteRebuild = nil
+            self?.handleConfigurationChange()
+        }
+        pendingRouteRebuild = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work)
+    }
+
+    private func handleConfigurationChange() {
+        // Only rebuild if the user is *actively* listening. After
+        // `stopListening` we still hold a non-nil `request` until the
+        // recognizer drains (hasEndAudioed=true bridges that window),
+        // and a config-change in that window must NOT restart capture
+        // — the user has already released the hotkey.
+        guard request != nil, !hasEndAudioed else {
+            stderrLog("audio config changed while idle/stopping — ignoring (request=\(request != nil), hasEndAudioed=\(hasEndAudioed))")
+            return
+        }
+        stderrLog("audio config changed mid-session (likely headphones plug/unplug) — rebuilding tap")
+
+        audioEngine.inputNode.removeTap(onBus: 0)
+        if audioEngine.isRunning {
+            audioEngine.stop()
+        }
+
+        // Re-assert the pinned device. If the device the user started the
+        // session on is gone (they actually unplugged it), fall back to
+        // the new system default rather than refusing to listen at all.
+        if pinnedInputDeviceID != AudioDeviceID(kAudioObjectUnknown)
+            && !deviceStillExists(pinnedInputDeviceID) {
+            stderrLog("pinned device id=\(pinnedInputDeviceID) is gone — falling back to current default")
+            pinnedInputDeviceID = currentDefaultInputDevice() ?? AudioDeviceID(kAudioObjectUnknown)
+        }
+        applyPinnedInputDevice()
+
+        if !installTapAndStartEngine() {
+            // Format wasn't usable yet — the OS sometimes posts a second
+            // notification once the new device finishes coming up. Try
+            // once more after a short grace period; if that also fails,
+            // give up and let the next route change retry.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                guard let self, self.request != nil, !self.audioEngine.isRunning else { return }
+                _ = self.installTapAndStartEngine()
+            }
+        }
     }
 
     // -------- speaking --------
