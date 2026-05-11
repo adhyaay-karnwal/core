@@ -44,6 +44,35 @@ function realpathSafe(p: string): string {
 	}
 }
 
+// Railway entrypoint symlinks `/app → /mnt/volume/workspace` and
+// `/home/corebrain → /mnt/volume/corebrain-home` to back the gateway's
+// workspace and home dirs with the persistent volume. Inputs that arrive
+// pre-resolved to the volume path (e.g. realpath'd paths, or
+// COREBRAIN_DEFAULT_WORKSPACE overridden to the volume path in the Railway
+// dashboard) get rewritten to the friendly symlinked form so the stored
+// folder list, the agent's `<AVAILABLE FOLDERS>` block, and the terminal's
+// `pwd` all agree.
+//
+// No-op outside Railway — guarded explicitly on COREBRAIN_DEPLOY_MODE so it
+// never fires on local dev or other hosts.
+function friendlyPath(abs: string): string {
+	if (process.env.COREBRAIN_DEPLOY_MODE !== 'railway') return abs;
+
+	const candidates = [
+		process.env.COREBRAIN_DEFAULT_WORKSPACE,
+		'/app',
+		COREBRAIN_HOME,
+	].filter((v): v is string => Boolean(v));
+
+	for (const friendly of candidates) {
+		const real = realpathSafe(friendly);
+		if (real === friendly) continue;
+		if (abs === real) return friendly;
+		if (abs.startsWith(real + '/')) return friendly + abs.slice(real.length);
+	}
+	return abs;
+}
+
 export function listFolders(): StoredFolder[] {
 	return getPreferences().gateway?.folders ?? [];
 }
@@ -53,7 +82,7 @@ export function addFolder(input: {
 	path: string;
 	scopes: Scope[];
 }): StoredFolder {
-	const inputPath = resolve(input.path);
+	const inputPath = friendlyPath(resolve(input.path));
 	if (!existsSync(inputPath) || !statSync(inputPath).isDirectory()) {
 		throw new Error(`Not a directory: ${inputPath}`);
 	}

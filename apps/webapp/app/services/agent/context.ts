@@ -453,7 +453,7 @@ ${
 SUBTASK PREP RULES:
 1. You are prepping ONE CHUNK of a larger task. Read the parent task description and any prior sibling outputs for context.
 2. Self-resolve questions using available context (parent description, gather_context, code reading). ONLY move to Waiting and ask the user if you genuinely cannot proceed without their input.
-3. For CODING tasks (when a gateway is connected): delegate brainstorming/planning to the gateway sub-agent. Before delegating, call get_task_coding_session — if it returns a session, resume that one (pass its sessionId, dir, and worktreeBranch to the gateway). If status is "starting", call reschedule_self(minutesFromNow=2) and do NOT start a new session.
+3. For CODING tasks (when a gateway is connected): delegate brainstorming/planning to the gateway sub-agent. Before delegating, call get_task_coding_session. If status is "starting" (gateway hasn't echoed back the sessionId — the session is still spinning up), call reschedule_self(minutesFromNow=2); do NOT call the gateway. If status is "ready", resume by default: pass sessionId, dir, and worktreeBranch. EXCEPTION: if the user explicitly asked for a fresh session or a different coding agent, omit the sessionId so the gateway starts a new session with the requested agent.
 4. For NON-CODING tasks: do the prep yourself using gather_context, take_action, and the readiness skills.
 5. Write your plan into the task description using update_task.
 6. When prep is complete, move to Review: update_task(taskId: "${linkedTask.id}", status: "Review"). Do NOT wait for user approval — subtasks auto-transition from prep to execute.
@@ -483,7 +483,7 @@ PREP RULES:
    - Unclear what's needed? → load "Gather Information" skill
    - Open-ended, needs shaping? → load "Brainstorm" skill
    - Multi-step, needs decomposition? → load "Plan" skill
-2. For CODING tasks (when a gateway is connected): delegate brainstorming/planning to the gateway sub-agent. Pass the task title and description. The gateway will return questions or a plan — do NOT tell it to execute. Before delegating, call get_task_coding_session — if it returns a session with status "ready", resume that session (pass sessionId, dir, worktreeBranch to the gateway); if status is "starting", call reschedule_self(minutesFromNow=2) and do NOT start a new session.
+2. For CODING tasks (when a gateway is connected): delegate brainstorming/planning to the gateway sub-agent. Pass the task title and description. The gateway will return questions or a plan — do NOT tell it to execute. Before delegating, call get_task_coding_session. If status is "starting" (gateway hasn't echoed back the sessionId — the session is still spinning up), call reschedule_self(minutesFromNow=2); do NOT call the gateway. If status is "ready", resume by default (pass sessionId, dir, worktreeBranch). EXCEPTION: if the user explicitly asked for a fresh session or a different coding agent, omit the sessionId so the gateway starts a new session.
 3. For NON-CODING tasks: do the prep yourself using gather_context, take_action, and the readiness skills.
 4. Write your findings/plan into the task description using update_task.
 5. When prep is complete, move to Review: update_task(taskId: "${linkedTask.id}", status: "Review")
@@ -529,7 +529,7 @@ THIS TASK IS WAITING. The user's message in this conversation is the reply that 
 
 RULES:
 - For integration work (emails, calendar, github, etc.): delegate to the orchestrator via gather_context / take_action
-- For coding, browser, shell: use gateway tools directly (coding_*, browser_*, exec_*) if connected. Before delegating coding work, call get_task_coding_session — if it returns a session with status "ready", resume it via the gateway with sessionId/dir/worktreeBranch and the intent "execute the plan"; if status is "starting", call reschedule_self(minutesFromNow=2) instead of starting a new session.
+- For coding, browser, shell: use gateway tools directly (coding_*, browser_*, exec_*) if connected. Before delegating coding work, call get_task_coding_session. If status is "starting" (gateway hasn't echoed back the sessionId — the session is still spinning up), call reschedule_self(minutesFromNow=2); do NOT call the gateway. If status is "ready", resume by default — pass sessionId/dir/worktreeBranch with the intent "execute the plan". EXCEPTION: if the user explicitly asked for a fresh session or a different coding agent, omit the sessionId so the gateway starts a new session with the requested agent.
 - If the user sends a message, treat it as additional direction for this task${
         isSubtask
           ? `
@@ -563,7 +563,7 @@ When you delegate a coding task to the gateway, it will return one of:
 
 When the user answers a question, resume the coding session with the answer. Do NOT write the answer into the task description.
 
-On re-execution after reschedule: call get_task_coding_session to resolve the latest coding session for this task — resume that session, do NOT start a new one. Delegate to gateway with the returned sessionId, dir, and intent "execute the plan" so the gateway enters Phase 3 (execution) rather than re-doing planning. If get_task_coding_session returns status "starting" (sessionId hasn't been assigned yet), call reschedule_self(minutesFromNow=2) and try again. Only pass user answers if the user has replied since the last run.
+On re-execution after reschedule (we rescheduled ourselves to poll progress — no user input in between): call get_task_coding_session to resolve the latest coding session for this task. If status is "starting" (sessionId hasn't been assigned yet), call reschedule_self(minutesFromNow=2) and try again. If status is "ready", resume that session — delegate to the gateway with the returned sessionId, dir, and intent "execute the plan" so the gateway enters Phase 3 (execution) rather than re-doing planning. Only pass user answers if the user has replied since the last run. EXCEPTION: if the user replied explicitly asking for a fresh session or a different coding agent, omit the sessionId so the gateway starts a new session.
 
 Do NOT sleep, poll coding_read_session, or create scheduled tasks yourself — the gateway handles that.
 </task_execution>`;

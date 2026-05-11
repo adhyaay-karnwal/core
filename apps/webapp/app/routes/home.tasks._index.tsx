@@ -129,7 +129,7 @@ export default function TasksIndex() {
   if (typeof window === "undefined") return null;
 
   return (
-    <div className="flex h-[calc(100vh-56px)] flex-col">
+    <div className="h-page-xs flex flex-col">
       <PageHeader
         title="Tasks"
         actionsNode={

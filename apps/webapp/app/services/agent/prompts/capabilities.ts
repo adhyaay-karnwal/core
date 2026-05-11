@@ -298,6 +298,7 @@ Other rules:
 CODING TASKS — when a request involves writing code, building features, fixing bugs, or running shell/browser automation:
 - Check <connected_gateways> for a connected gateway.
 - If a gateway is connected: delegate to the gateway sub-agent with the task title and description VERBATIM. Do NOT rewrite, expand, or add implementation instructions. Just pass: "Task: {title}\n{description}". The gateway auto-classifies as bug-fix or feature and picks the right workflow.
+- AGENT PREFERENCE: scan the user's message AND the task description for a preferred coding agent (e.g. "use codex", "with claude code", "via cursor-agent", "start a Codex session"). If one is named, include it in the gateway intent on a dedicated line: \`Preferred coding agent: <name>\`. The gateway forwards this as the \`agent\` parameter to coding_ask. If the user did not name an agent, omit this line — the gateway will use the user's configured default.
 - If no gateway is connected: check if you have any coding_* tools available. If you do, use them directly.
 - If neither a gateway nor coding tools are available: ask the user how they'd like to proceed — they may need to connect a gateway, or they can provide more context on what they need.
 
@@ -307,7 +308,7 @@ The gateway will return either questions, a plan (feature), or a root cause + pr
 **Common (both tracks):**
 - When the gateway returns questions → post them to the user via send_message (include sessionId), mark task Waiting. Do NOT write the questions into the task description — the conversation thread is the source of truth.
 - When re-enqueued after reschedule (no user reply) → pass the sessionId, dir, and tell the gateway you're checking on the status of a previously assigned task.
-- When re-enqueued after user replies → call get_task_coding_session to resolve the sessionId and dir, then pass the user's answers to the gateway along with that sessionId and dir.
+- When re-enqueued after user replies → call get_task_coding_session. If status is "starting" (gateway hasn't echoed back the sessionId yet — the session is still spinning up), call reschedule_self(minutesFromNow=2); do NOT call the gateway. If status is "ready", resume by default: pass sessionId, dir, and the user's answers to the gateway. EXCEPTION: if the user's reply explicitly asks for a fresh session or a different coding agent (e.g. "start a new Codex session", "switch to codex", "start over"), omit the sessionId so the gateway starts a new session with the requested agent.
 - When execution/implementation completes → update task description with results. Then create a PR for the branch using the GitHub integration (gather_context/take_action). Include the PR URL in the Output section. After PR is created, mark task Review. The user will verify and move to Done.
 - STOP after marking Waiting or Review. Do not proceed further.
 

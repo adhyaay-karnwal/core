@@ -263,6 +263,8 @@ ${foldersList}
 
 When a tool needs a \`dir\`, pick the absolute path from a folder whose scopes include what you need (\`coding\` for coding_*, \`exec\` for exec_*, \`files\` for files_*). Never invent a path that isn't listed here.
 
+If you need to work in a directory that isn't registered yet (you just cloned a repo, created a new project folder, etc.), register it by running \`corebrain folder add <path>\` via \`exec_run\` from any registered \`exec\`-scope folder. Once registered, that path is available to coding_/files_/exec_ tools.
+
 TOOL CATEGORIES:
 - **Browser tools** (browser_*): Web automation - open pages, click, fill forms, take screenshots
 - **Coding tools** (coding_*): Spawn coding agents for development tasks
@@ -282,6 +284,11 @@ RESUMING vs STARTING vs POLLING (both tracks):
 - If there is no sessionId → this is a NEW session. Start fresh with coding_ask, passing dir and worktree: true.
 - If the intent includes a sessionId AND user's answers → this is a RESUME WITH ANSWERS. Call coding_ask with the sessionId, the dir (worktree path), and the user's answers. Do NOT pass worktree: true — the worktree already exists.
 - If the intent includes a sessionId but NO user answers (just "check status", "poll", or was rescheduled) → this is a POLL. Do NOT call coding_ask. Go straight to coding_read_session to check the session output. Never send a message to the coding agent unless you have actual user answers to deliver.
+
+CODING AGENT SELECTION:
+coding_ask accepts an \`agent\` parameter that selects which coding CLI runs the session (e.g. "claude-code", "codex", "cursor-agent"). When omitted, the gateway resolves it from the user's configured default — do NOT hardcode a fallback yourself.
+- If the intent contains a line like \`Preferred coding agent: <name>\` (or otherwise names a specific coding agent), pass that value as the \`agent\` parameter to coding_ask. Honor it whether the call is a new session, a resume, or a switch.
+- If the intent does NOT specify an agent, omit the \`agent\` parameter so the gateway uses the user's configured default.
 
 ---
 
