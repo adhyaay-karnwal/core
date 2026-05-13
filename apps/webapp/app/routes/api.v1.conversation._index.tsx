@@ -38,6 +38,26 @@ import {
 } from "~/services/agent/context-window";
 
 import { RequestContext } from "@mastra/core/request-context";
+
+// Heap instrumentation. Temporary — we're chasing an OOM that may be
+// per-turn (allocation spike) or cross-turn (retention leak). Logging
+// heapUsed at four checkpoints lets us tell the two apart on the next
+// crash: entry-heap drifting up across turns means retention; spikes
+// only within a turn mean allocation.
+function logHeap(
+  label: string,
+  extra: Record<string, unknown> = {},
+): void {
+  const m = process.memoryUsage();
+  logger.info(`[heap] ${label}`, {
+    ...extra,
+    heapUsedMB: Math.round(m.heapUsed / 1024 / 1024),
+    heapTotalMB: Math.round(m.heapTotal / 1024 / 1024),
+    rssMB: Math.round(m.rss / 1024 / 1024),
+    externalMB: Math.round(m.external / 1024 / 1024),
+  });
+}
+
 const ChatRequestSchema = z.object({
   message: z
     .object({
@@ -79,6 +99,8 @@ const { loader, action } = createHybridActionApiRoute(
     corsStrategy: "all",
   },
   async ({ body, authentication, request }) => {
+    logHeap("handler:start", { conversationId: body.id });
+
     const conversation = await getConversationAndHistory(
       body.id,
       authentication.userId,
@@ -86,6 +108,11 @@ const { loader, action } = createHybridActionApiRoute(
     const isAssistantApproval = body.needsApproval;
     const conversationHistory = conversation?.ConversationHistory ?? [];
     const incomingUserText = body.message?.parts?.[0]?.text;
+
+    logHeap("handler:history-loaded", {
+      conversationId: body.id,
+      historyRows: conversationHistory.length,
+    });
 
     // -----------------------------------------------------------------------
     // Persist incoming user message (skip on approval flows)
@@ -182,6 +209,11 @@ const { loader, action } = createHybridActionApiRoute(
       finalMessages = selection.messages;
     }
 
+    logHeap("handler:context-selected", {
+      conversationId: body.id,
+      finalMessageCount: finalMessages.length,
+    });
+
     // -----------------------------------------------------------------------
     // Build agent + context
     // -----------------------------------------------------------------------
@@ -267,6 +299,11 @@ const { loader, action } = createHybridActionApiRoute(
             ? convertedMessages[convertedMessages.length - 1].parts
             : [],
           ...saveParams,
+        });
+
+        logHeap("handler:stream-complete", {
+          conversationId: body.id,
+          messageCount: messages.length,
         });
         return messages;
       },
