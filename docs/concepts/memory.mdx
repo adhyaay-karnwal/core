@@ -1,19 +1,21 @@
 ---
 title: "Memory"
-description: "How your butler remembers everything you tell it"
+description: "Pointer to the memory documentation."
 ---
 
-## Pillar 1: It Remembers Everything
-
-Memory is the foundation of CORE. It's a temporal knowledge graph that captures everything — conversations, decisions, preferences, relationships — and organizes it so the right context surfaces at the right time.
-
-Unlike note-taking apps or RAG systems that store text chunks, CORE's memory understands *what kind* of information it's storing, *who* it's about, and *when* it changed. Ask about something from weeks ago and the answer is there, with full context of how you got there.
+CORE's memory is a temporal knowledge graph. Episodes are the raw ingested content. Entities are nodes (people, projects, technologies, etc.). Statements are atomic facts classified by aspect. Labels scope queries.
 
 <CardGroup cols={2}>
   <Card title="Memory Overview" icon="database" href="/memory/overview">
-    The full picture: episodes, entities, statements, ingestion, search, and organization.
+    Primitives, storage, and retrieval.
   </Card>
   <Card title="How CORE Searches" icon="magnifying-glass" href="/memory/how-core-searches">
-    Intent-driven retrieval — query classification, hybrid search, and ranking.
+    Query classification, hybrid search, and ranking.
+  </Card>
+  <Card title="How CORE Ingests" icon="arrow-down-to-line" href="/memory/how-core-ingests">
+    Ingestion pipeline from raw input to statements.
+  </Card>
+  <Card title="Reference" icon="book" href="/memory/reference">
+    Enums, MCP tools, and vector namespaces.
   </Card>
 </CardGroup>

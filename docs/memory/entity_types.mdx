@@ -1,59 +1,42 @@
 ---
 title: "Entity Types"
-description: "How CORE recognizes and connects the people, projects, and concepts in your world"
+description: "The 11 entity types CORE extracts, how they are deduplicated, and how they flow through search."
 ---
 
-## What Are Entities?
+## What entities are
 
-Entities are the nodes of your memory graph — the people, projects, companies, tools, and concepts that appear across your conversations. When you mention "Sarah" in a Slack thread, reference "TaskMaster" in a GitHub PR, and discuss "authentication" in Claude Code, CORE recognizes these as entities and connects them.
+Entities are nodes in the memory graph. Statements link entities together to form facts like "Sarah works at Red Planet". When the same entity is mentioned across multiple episodes, CORE deduplicates it by name normalization plus vector similarity in the `ENTITY` namespace, so all references resolve to a single node.
 
-Every statement in your memory links back to entities. "Sarah works on TaskMaster" connects the Person entity `Sarah` to the Organization entity `TaskMaster` through a relationship.
+## The 11 entity types
 
----
+CORE defines 11 entity types in `EntityTypes` (`packages/types/src/graph/graph.entity.ts`). Only named, searchable entities are extracted, no generic vocabulary.
 
-## Core Entity Types
+| Type | Captures | Examples |
+| --- | --- | --- |
+| `Person` | People | Sarah, John, Dr. Chen, Mike |
+| `Organization` | Companies, teams | Google, Red Planet, Design Team |
+| `Place` | Locations | Bangalore, San Francisco, Office HQ |
+| `Event` | Occurrences | React Conference, Q2 Planning, Sprint Review |
+| `Project` | Work initiatives | CORE, MVP, Website Redesign |
+| `Task` | Tracked items | CORE-123, Issue #456, TODO-789 |
+| `Technology` | Tools, frameworks | TypeScript, PostgreSQL, React, Neo4j |
+| `Product` | Products, services | iPhone, Slack, ChatGPT, Figma |
+| `Standard` | Methodologies | OAuth 2.0, REST API, Agile, SOLID |
+| `Concept` | Abstract topics | Fat Loss, Code Review, Search Pipeline |
+| `Predicate` | Relationships | "works at", "lives in", "manages" |
 
-| **Type** | **Description** | **Key Attributes** | **Example** |
-| --- | --- | --- | --- |
-| **Person** | People in your network | email, role | "Sarah (Engineer, sarah@company.com)" |
-| **Organization** | Companies, teams, groups | industry, size | "TaskMaster (Startup, Series A)" |
-| **Place** | Physical or virtual locations | address | "San Francisco Office (123 Main St)" |
-| **Event** | Time-based occurrences | startTime, endTime | "TaskMaster Launch (Q2 2025)" |
-| **File** | Documents, code, and media | fileId, source | "Wireframes (Figma, Updated Daily)" |
+## Predicate is special
 
-## Application-Specific Entities
+`Predicate` represents relationship edges, not standalone nodes. It is used when a statement asserts a connection between two other entities, such as `works_at`, `lives_in`, or `manages`. A `Predicate` does not appear as a node you would search for directly; it labels an edge in the graph.
 
-CORE also understands entities from your connected apps:
+## How entities are extracted and resolved
 
-| **Source** | **Entity Types** |
-| --- | --- |
-| **GitHub** | Repositories, issues, pull requests, commits |
-| **Slack** | Channels, threads |
-| **Linear** | Issues, projects, teams |
-| **Gmail** | Contacts, threads |
+During ingestion CORE extracts entities from episode text and classifies each one into one of the 11 types. New mentions are deduplicated against existing entities by name normalization plus vector similarity in the `ENTITY` namespace (`packages/providers/src/vector/constants.ts`). When the same entity appears in multiple episodes, the new mention is linked to the existing node automatically, so the graph grows without producing duplicate nodes for "Sarah", "Sarah Chen", and "@sarah".
 
----
+## How entities flow through search
 
-## How Entities Are Extracted
+When a search query mentions an entity by name, the router populates `entityHints`. Search handlers such as `entity_lookup`, `relationship`, `aspect_query`, and `temporal` embed each hint and search the `ENTITY` vector namespace to resolve the hint to one or more entity UUIDs. The handler then graph-fetches connected episodes and statements from those nodes, so a query for "Sarah" returns everything attached to the resolved `Person` entity, not just literal name matches.
 
-When CORE ingests a conversation, it automatically:
+## Integration-sourced entities
 
-1. **Identifies entities** — Names, projects, tools, and concepts are recognized from natural language
-2. **Resolves duplicates** — "Sarah," "Sarah Chen," and "@sarah" are linked to the same Person entity
-3. **Creates relationships** — "Sarah works on TaskMaster" creates a `works_on` edge between two entities
-4. **Updates over time** — If Sarah switches teams, CORE marks the old relationship as superseded and creates a new one with temporal metadata
-
-This means searching for "Sarah" doesn't just find mentions of her name — it surfaces everything connected to her: projects, decisions, conversations, code reviews, and open issues.
-
----
-
-## How Entities Connect
-
-Entities form the backbone of your memory graph. Each entity can connect to:
-
-- **Other entities** via relationships ("Sarah `works_on` TaskMaster")
-- **Statements** that reference them ("Sarah prefers TypeScript" is a statement about the entity `Sarah`)
-- **Episodes** where they appear (the Slack thread where Sarah was mentioned)
-
-This structure enables [relationship queries](/memory/query_types) — asking "How do I know Sarah?" traverses the entity graph to find all connections: shared projects, conversations, decisions, and interactions.
-
+Entities from connected apps are classified into one of the 11 types above, not separate types. A GitHub repository becomes a `Project`. A GitHub issue or Linear issue becomes a `Task`. A Slack channel becomes a `Place` or `Organization` depending on context. A Gmail contact becomes a `Person`. Integrations are sources of episodes, the entity schema is the same regardless of source.

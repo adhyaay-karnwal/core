@@ -45,7 +45,8 @@
               "memory/aspects",
               "memory/query_types",
               "memory/entity_types",
-              "memory/labels"
+              "memory/labels",
+              "memory/reference"
             ]
           }
         ]

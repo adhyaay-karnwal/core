@@ -1,45 +1,45 @@
 ---
 title: "Labels"
-description: "Organize your memory with workspace-scoped labels"
+description: "Workspace-scoped tags that act as the primary scoping mechanism for V2 search"
 ---
 
-## What Are Labels?
+## What labels are
 
-Labels are CORE's tagging system for organizing episodes, sessions, and documents. Think of them as project tags - you can apply multiple labels to any piece of content, making it easy to filter and find related memories across different contexts.
+Labels are workspace-scoped tags applied to episodes, sessions, and documents. They are flat (no hierarchies, no nesting) and unique per workspace. Each label has a name, an optional description, and a color.
 
-Labels are scoped to your workspace (unique per workspace, not global) and use a flat structure - no hierarchies, no nesting.
+## How labels scope search
 
----
+Labels are the primary scoping mechanism in V2 search. The router (`apps/webapp/app/services/search-v2/router.ts`) embeds the query and runs vector search against the `LABEL` namespace defined in `packages/providers/src/vector/constants.ts`. The similarity threshold is controlled by `env.SEARCH_LABEL_VECTOR_THRESHOLD`.
 
-## Using Labels in Search
+The matched labels are passed to the LLM aspect-extraction step, which returns `selectedLabels: string[]`, the labels actually relevant to the query intent. The LLM is forbidden from inventing label names not in the matched list.
 
-Labels make searches faster and more precise. When you filter by labels, CORE narrows the search space before executing - across all search methods (vector, BM25, graph traversal).
+Handlers then call `getMatchedLabelIds()` to produce the final label set: LLM-selected labels take priority, with a fallback to score-threshold filtering when the LLM picks none. Graph traversal is then scoped by `labelIds`.
 
-```
-Query: "API design decisions"
-Labels: ["Project: TaskMaster"]
-→ Only returns TaskMaster-related API decisions
-```
+When the workspace has no labels, or no label vector clears the threshold, handlers fall back to `getEpisodesViaVectorSearch()` against the `EPISODE` namespace. Labels are the fast path, vector-on-episodes is the recall safety net.
 
-You can combine labels with time filters, aspect filters, or use multiple labels together.
+## Creating labels
 
----
+Labels are created from the CORE dashboard at Settings, Labels. Set a name, optional description, and color. They are available in the workspace immediately and can be applied to content during ingestion or after the fact.
 
-## Creating Labels
+## Filtering with labels at query time
 
-From the CORE web dashboard, navigate to **Settings → Labels** and create labels with a name, optional description, and color. Labels appear in your workspace immediately and can be applied to episodes during ingestion or retroactively.
+The MCP `memory_search` tool accepts `labelIds` as an option. Passing `labelIds` force-scopes the search to those labels and bypasses router selection, useful when the caller already knows the relevant project, client, or topic.
 
----
+## Examples
 
-## Example: Organizing a Multi-Project Workspace
+A multi-project workspace might use labels like:
 
 ```
-Labels:
-- "Project: TaskMaster" (color: blue)
-- "Project: CORE Features" (color: green)
-- "Client: Acme Corp" (color: purple)
-- "Topic: Authentication" (color: red)
-- "Topic: Performance" (color: orange)
+- "Project: TaskMaster" (blue)
+- "Project: CORE Features" (green)
+- "Client: Acme Corp" (purple)
+- "Topic: Authentication" (red)
+- "Topic: Performance" (orange)
 ```
 
-Keep labels concise and use consistent naming. 2-4 labels per episode is typical - don't over-label.
+Keep names concise and consistent. Two to four labels per episode is typical.
+
+## Related
+
+- [How CORE searches](/memory/how-core-searches)
+- [Query types](/memory/query_types)

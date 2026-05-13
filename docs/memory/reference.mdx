@@ -1,0 +1,187 @@
+---
+title: Memory reference
+description: Canonical identifiers, enums, tool names, and shapes for CORE memory.
+---
+
+## When to use this page
+
+Quick lookup for exact identifiers. For conceptual explanations, see the linked pages.
+
+## Statement aspects
+
+CORE classifies every statement into one of 12 aspects. Six are stored as complete statements in the Aspects Store (`VOICE_ASPECTS`). The other six are decomposed into SPO triples and written to Neo4j.
+
+| Aspect | Group | Storage |
+| --- | --- | --- |
+| `Identity` | graph | Neo4j SPO |
+| `Knowledge` | graph | Neo4j SPO |
+| `Belief` | voice | Aspects Store |
+| `Preference` | voice | Aspects Store |
+| `Habit` | voice | Aspects Store |
+| `Goal` | voice | Aspects Store |
+| `Task` | voice | Aspects Store |
+| `Directive` | voice | Aspects Store |
+| `Decision` | graph | Neo4j SPO |
+| `Event` | graph | Neo4j SPO |
+| `Problem` | graph | Neo4j SPO |
+| `Relationship` | graph | Neo4j SPO |
+
+See [memory/aspects](/memory/aspects) for the full aspect model.
+
+## Entity types
+
+CORE recognizes 11 entity types when extracting statements.
+
+| Type | Description | Example |
+| --- | --- | --- |
+| `Person` | A human individual. | `Sarah Chen` |
+| `Organization` | A company, team, group, or institution. | `CORE`, `Acme Inc.` |
+| `Place` | A physical or virtual location. | `San Francisco`, `the warehouse` |
+| `Event` | A bounded occurrence in time. | `Q3 launch`, `team offsite` |
+| `Project` | A named initiative or workstream. | `Project Atlas` |
+| `Task` | A unit of work or todo. | `Ship the docs rewrite` |
+| `Technology` | A tool, framework, language, or system. | `Neo4j`, `Postgres` |
+| `Product` | A shippable product or service. | `CORE Memory` |
+| `Standard` | A protocol, spec, or norm. | `MCP`, `OAuth2` |
+| `Concept` | An abstract idea, topic, or category. | `latency`, `retention` |
+| `Predicate` | A relation type used in SPO triples. | `works_on`, `lives_in` |
+
+See [memory/entity_types](/memory/entity_types) for usage in extraction.
+
+## Query types
+
+The router classifies every incoming query into one of 6 query types. Each type has a dedicated handler in `apps/webapp/app/services/search-v2/handlers.ts`.
+
+| Type | Handler | Returns |
+| --- | --- | --- |
+| [`aspect_query`](/memory/query_types#aspect_query) | aspect handler | Statements from the Aspects Store filtered by aspect group. |
+| [`entity_lookup`](/memory/query_types#entity_lookup) | entity lookup handler | Facts about a specific entity (broad) or a specific attribute (attribute mode). |
+| [`temporal`](/memory/query_types#temporal) | temporal handler | Statements scoped to a time window. |
+| [`temporal_facets`](/memory/query_types#temporal_facets) | temporal facets handler | Aggregated facets over a time window across topics, entities, or aspects. |
+| [`exploratory`](/memory/query_types#exploratory) | exploratory handler | Broad hybrid search across statements, episodes, and the graph. |
+| [`relationship`](/memory/query_types#relationship) | relationship handler | SPO triples and connections between entities. |
+
+## Vector namespaces
+
+CORE writes embeddings into 6 named namespaces. The TypeScript constant lives in `packages/providers/src/vector/constants.ts`.
+
+| Namespace | String value | Used for |
+| --- | --- | --- |
+| `ENTITY` | `entity` | Entity name embeddings, dedupe, and resolution. |
+| `STATEMENT` | `statement` | Statement fact embeddings. |
+| `EPISODE` | `episode` | Episode content embeddings. |
+| `COMPACTED_SESSION` | `compacted_session` | Compacted session summary embeddings. |
+| `LABEL` | `label` | Label embeddings used for search routing. |
+| `ASPECT` | `voice_aspect` | Voice aspect dedupe in the Aspects Store. |
+
+## Router output shape
+
+The router (`apps/webapp/app/services/search-v2/router.ts`) returns a `RouterOutput` object that downstream handlers consume.
+
+```json
+{
+  "matchedLabels": [{ "labelId": "string", "labelName": "string", "score": 0.85 }],
+  "aspects": ["Preference", "Decision"],
+  "queryType": "aspect_query",
+  "temporal": { "type": "recent", "days": 7, "startDate": null, "endDate": null },
+  "shouldSearch": true,
+  "entityHints": ["Sarah", "CORE"],
+  "selectedLabels": ["Project: CORE"],
+  "lookupMode": "broad",
+  "attributeHint": null,
+  "facets": [],
+  "confidence": 0.85,
+  "routingTimeMs": 420
+}
+```
+
+### Fields
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `matchedLabels` | array of `{ labelId, labelName, score }` | Labels resolved from the query via vector search. `score` is the similarity. |
+| `aspects` | array of aspect strings | Aspects the query targets. Subset of the 12 aspect identifiers. |
+| `queryType` | one of the 6 query types | Selected handler. |
+| `temporal` | object | Time filter. See `## Temporal filter`. |
+| `shouldSearch` | boolean | If `false`, the router decided no search is needed. |
+| `entityHints` | array of strings | Entity name hints extracted from the query. |
+| `selectedLabels` | array of strings | Human-readable label names chosen for the search. |
+| `lookupMode` | `"attribute"` or `"broad"` | Only set when `queryType` is `entity_lookup`. |
+| `attributeHint` | string or `null` | Field name when `lookupMode` is `"attribute"`. |
+| `facets` | array of facet dimension strings | Only set when `queryType` is `temporal_facets`. |
+| `confidence` | number `0..1` | Router confidence in the classification. |
+| `routingTimeMs` | number | Wall time spent in the router. |
+
+## Temporal filter
+
+The `temporal` object on the router output describes a time window.
+
+| `type` value | Semantics |
+| --- | --- |
+| `"recent"` | Use `days` as a rolling window ending now. |
+| `"range"` | Use both `startDate` and `endDate`. |
+| `"before"` | Use `endDate` as an upper bound. |
+| `"after"` | Use `startDate` as a lower bound. |
+| `"all"` | No time filter. |
+
+Field semantics:
+
+| Field | Used when | Format |
+| --- | --- | --- |
+| `days` | `type` is `"recent"` | integer number of days |
+| `startDate` | `type` is `"range"` or `"after"` | ISO 8601 date string |
+| `endDate` | `type` is `"range"` or `"before"` | ISO 8601 date string |
+
+## Lookup modes
+
+Only applies when `queryType` is `entity_lookup`.
+
+| `lookupMode` | Behavior | `attributeHint` |
+| --- | --- | --- |
+| `"broad"` | Return general facts about the entity. | `null` |
+| `"attribute"` | Return only facts about a specific attribute. | Field name string, e.g. `"phone"`, `"email"`, `"team"` |
+
+## Facet dimensions
+
+Only applies when `queryType` is `temporal_facets`. The `facets` array contains one or more of:
+
+| Dimension | Aggregates over |
+| --- | --- |
+| `"topics"` | Topic labels in the time window. |
+| `"entities"` | Entities mentioned in the time window. |
+| `"aspects"` | Aspect classifications in the time window. |
+
+## MCP memory tools
+
+CORE exposes three memory tools over MCP, defined in `apps/webapp/app/utils/mcp/memory.ts`.
+
+| Tool name | Purpose | Key parameters |
+| --- | --- | --- |
+| `memory_search` | Search the knowledge graph. | `query` (string), optional `labelIds` (array), optional time range, optional `limit` |
+| `memory_ingest` | Push content into memory. | content payload |
+| `memory_about_user` | Return profile-like info about the user. | none |
+
+## Workspace version and search path
+
+CORE supports two search paths gated by `workspace.version` (see `apps/webapp/app/services/agent/memory.ts`).
+
+| `workspace.version` | Search behavior |
+| --- | --- |
+| `"V3"` | V2 search only. No V1 fallback. |
+| Any other value | V2 first. If V2 returns empty, fall back to V1 (BM25 + vector + BFS hybrid in `apps/webapp/app/services/search.server.ts`). |
+
+Related environment variables:
+
+| Variable | Effect |
+| --- | --- |
+| `SEARCH_LABEL_VECTOR_THRESHOLD` | Candidate threshold for label vector search. |
+
+## Related concepts
+
+- [memory/overview](/memory/overview)
+- [memory/how-core-searches](/memory/how-core-searches)
+- [memory/how-core-ingests](/memory/how-core-ingests)
+- [memory/aspects](/memory/aspects)
+- [memory/entity_types](/memory/entity_types)
+- [memory/query_types](/memory/query_types)
+- [memory/labels](/memory/labels)

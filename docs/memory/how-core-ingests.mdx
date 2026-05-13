@@ -1,93 +1,131 @@
 ---
 title: "How CORE Ingests Memory"
-description: "How information enters and structures your knowledge graph"
+description: "The ingestion pipeline that turns raw content into Episodes, Entities, Statements, and embeddings."
 ---
 
-## Overview
+## Pipeline overview
 
-Ingestion is how raw information becomes structured knowledge in your graph. Every conversation, app event, and document goes through a pipeline that extracts entities, identifies relationships, classifies facts by aspect, and links everything into your growing knowledge graph.
-
----
-
-## The Ingestion Pipeline
-
-Every conversation is processed into structured facts — not saved as raw text.
+Ingestion turns raw content into structured primitives: `Episode`, `Entity`, `Statement`. Statements are classified by aspect, then routed to one of two stores. Embeddings are written alongside for retrieval.
 
 ```mermaid
 flowchart LR
-    CONV["Conversation or event completes\nchat · reminder execution · email processed"]
+    CONV["Conversation or event\nchat, integration event, upload"]
 
-    EXTRACT["① Extract entities & relationships\nPeople · projects · companies · concepts\nand how they connect to each other"]
+    EP["① Episode created\nraw content preserved verbatim\n+ timestamp, source, channel, labels"]
 
-    CLASSIFY["② Classify each fact by type\npreference · decision · goal\ndirective · rule · observation"]
+    ENT["② Entity extraction\n11 entity types\ndedupe via name normalization\n+ vector similarity in ENTITY namespace"]
 
-    EPISODE["③ Create an episode\nGroup related facts under a\ntimestamped conversation record"]
+    STMT["③ Statement extraction\nfacts classified into 1 of 12 aspects"]
 
-    GRAPH["④ Write to Knowledge Graph\nEpisodes · entities · statements\nlinked with timestamps"]
+    SPLIT{"④ Storage split\nby aspect type"}
 
-    MEM[("🧠 Memory\nKnowledge Graph")]
+    AS[("Aspects Store\nvoice aspects:\nDirective, Preference, Habit,\nBelief, Goal, Task")]
 
-    CONV --> EXTRACT --> CLASSIFY --> EPISODE --> GRAPH --> MEM
+    NEO[("Neo4j\ngraph aspects as SPO triples:\nIdentity, Knowledge, Decision,\nEvent, Problem, Relationship")]
+
+    EMB["⑤ Embeddings\nENTITY, STATEMENT, EPISODE,\nLABEL, ASPECT namespaces"]
+
+    CONV --> EP --> ENT --> STMT --> SPLIT
+    SPLIT -->|voice| AS
+    SPLIT -->|graph| NEO
+    AS --> EMB
+    NEO --> EMB
 ```
 
-**What gets stored:** preferences, decisions, goals, directives, relationships, people and topics — not just facts but the *when* and *why* behind them.
+Both stores link back to the source `Episode`, so any retrieved fact can be traced to the original content.
 
-<Steps>
-  <Step title="Raw Input Capture">
-    Information arrives from conversations with the Butler, integration activity (GitHub commits, Slack messages, Linear issues), manual document uploads, or scheduled syncs from connected apps.
-  </Step>
+## Stage 1: Episode creation
 
-  <Step title="Episode Creation">
-    The raw content becomes an **Episode** - the atomic unit of memory. Original content is preserved as source of truth, metadata is captured (timestamp, source, channel), and labels are applied based on context.
-  </Step>
+Raw content becomes an `Episode`. The original text is preserved verbatim as the source of truth.
 
-  <Step title="Entity Extraction">
-    CORE identifies all entities mentioned - people, projects, technologies, concepts, companies. Entities are normalized and deduplicated (e.g., "Sarah", "sarah", "@sarah" resolve to the same entity).
-  </Step>
+Metadata captured at this stage:
+- `timestamp`: when the content occurred
+- `source`: integration or entry point (Slack, GitHub, Gmail, Butler, MCP, upload)
+- `channel`: sub-source identifier (channel name, repo, thread)
+- `labels`: applied automatically based on context, or set by the agent at ingestion time
 
-  <Step title="Statement Extraction">
-    Facts are extracted as structured triples: subject → predicate → object. Each statement is classified into one of [11 aspects](/memory/aspects) (Identity, Preference, Decision, etc.).
-  </Step>
+## Stage 2: Entity extraction
 
-  <Step title="Graph Integration">
-    New information integrates with existing knowledge. Duplicate facts are deduplicated, contradictions are handled (newer facts supersede older ones), and related entities are automatically linked.
-  </Step>
-</Steps>
+CORE extracts entities from the episode and assigns each one of 11 types (see [entity types](/memory/entity_types)): `Person`, `Organization`, `Place`, `Event`, `Project`, `Task`, `Technology`, `Product`, `Standard`, `Concept`, `Predicate`.
 
----
+Deduplication runs in two passes:
+1. Name normalization, so "Sarah", "sarah", "@sarah" collapse.
+2. Vector similarity in the `ENTITY` namespace, so "Sarah Chen" and "Sarah" resolve when context confirms a match.
 
-## Automatic vs Manual Ingestion
+The resolved entity becomes the canonical node referenced by all later statements.
 
-**Automatic:** Connected integrations feed activity into memory in real-time or via scheduled syncs. Conversations with the Butler are captured automatically. Zero effort - happens in the background.
+## Stage 3: Statement extraction
 
-**Manual:** Tell the agent directly: "Remember this: I prefer using Fastify over Express for APIs because of better TypeScript support." Or use the MCP `memory_ingest` tool from any connected AI agent.
+Facts are extracted from the episode as discrete statements. Each statement is classified into one of 12 aspects (see [aspects](/memory/aspects)): `Identity`, `Knowledge`, `Belief`, `Preference`, `Habit`, `Goal`, `Task`, `Directive`, `Decision`, `Event`, `Problem`, `Relationship`.
 
----
+The aspect determines where the statement is stored in the next stage.
 
-## How CORE Handles Conflicts
+## Stage 4: Storage
 
-### Entity Resolution
+CORE splits statements across two stores based on aspect:
 
-When the same person or concept is mentioned differently across conversations ("Sarah", "Sarah Chen", "@sarah", "sarah@company.com"), CORE resolves them to a single entity. Searching for "Sarah" surfaces everything connected to her - not just exact name matches.
+**Voice aspects** go to the Aspects Store as complete, non-decomposed statements: `Directive`, `Preference`, `Habit`, `Belief`, `Goal`, `Task`. These represent what the user speaks (rules, preferences, beliefs, goals, habits, tasks) and are kept whole so the original phrasing survives.
 
-### Contradiction Handling
+**Graph aspects** go to Neo4j as subject-predicate-object (SPO) triples: `Identity`, `Knowledge`, `Decision`, `Event`, `Problem`, `Relationship`. Decomposition into triples enables structured graph traversal and relationship queries.
 
-When new facts contradict old ones, CORE doesn't overwrite - it creates a temporal chain. The old statement is marked as superseded with its timestamp, and the new statement becomes current. Search results show the current state while preserving history: "Currently prefers GraphQL (as of Feb 10), previously preferred REST."
+Both stores link every statement back to the source `Episode`, preserving provenance.
 
----
+## Stage 5: Embeddings
 
-## Next Steps
+During ingestion, embeddings are written to five vector namespaces:
 
-<CardGroup cols={3}>
-  <Card title="How CORE Searches" icon="magnifying-glass" href="/memory/how-core-searches">
-    How CORE retrieves information from your memory
-  </Card>
+- `ENTITY`: entity dedupe and resolution
+- `STATEMENT`: statement dedupe and similarity search
+- `EPISODE`: episode similarity, used as a fallback path in retrieval
+- `LABEL`: label matching during search routing
+- `ASPECT`: aspect dedupe in the Aspects Store
 
-  <Card title="Statement Aspects" icon="tags" href="/memory/aspects">
-    How facts are categorized during ingestion
-  </Card>
+V2 search uses these for label routing, entity resolution, and similarity fallback when graph traversal does not return a direct hit.
 
-  <Card title="Labels" icon="tag" href="/memory/labels">
-    Organize ingested content with labels
-  </Card>
-</CardGroup>
+## Conflict handling
+
+### Entity resolution
+
+When the same person or concept appears under different surface forms ("Sarah", "Sarah Chen", "@sarah", "sarah@company.com"), CORE resolves them to a single entity using name normalization plus vector similarity in the `ENTITY` namespace. Searching for "Sarah" surfaces everything connected to her, not just exact name matches.
+
+### Contradiction handling
+
+When a new statement contradicts an existing one, CORE does not overwrite. It creates a temporal chain: the old statement gets an `invalidAt` timestamp, and the new statement becomes current. Search returns the current state by default, with history accessible: "Currently prefers GraphQL (as of Feb 10), previously preferred REST."
+
+## Worked example
+
+Input episode:
+
+```
+Episode (Slack DM, 2026-02-10):
+"Sarah and I decided to use Neo4j for the new graph service.
+ I prefer pnpm over npm because of better TypeScript support."
+```
+
+Extracted entities:
+- `Sarah`: `Person`
+- `Neo4j`: `Technology`
+- `pnpm`: `Technology`
+- `npm`: `Technology`
+- `TypeScript`: `Technology`
+
+Extracted statements:
+- `Decision`: "Use Neo4j for the new graph service" → graph aspect, stored in Neo4j as an SPO triple
+- `Preference`: "Prefers pnpm over npm" → voice aspect, stored in the Aspects Store
+- `Belief`: "pnpm has better TypeScript support" → voice aspect, stored in the Aspects Store
+
+All three statements link back to the same source `Episode`, so retrieval can return the original Slack DM as evidence.
+
+## Ingestion entry points
+
+- **Automatic via integrations**: GitHub, Slack, Linear, Gmail, and other connected apps stream events into ingestion in real time or via scheduled syncs.
+- **Butler conversations**: chats with the Butler are auto-ingested.
+- **Manual dashboard upload**: drop documents or paste content directly.
+- **Programmatic via MCP**: any connected AI agent can call the `memory_ingest` tool to push raw content.
+
+## Related
+
+- [How CORE Searches](/memory/how-core-searches)
+- [Statement aspects](/memory/aspects)
+- [Entity types](/memory/entity_types)
+- [Labels](/memory/labels)

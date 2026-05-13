@@ -1,45 +1,49 @@
 ---
 title: "Statement Aspects"
-description: "How CORE categorizes every fact for intelligent retrieval"
+description: "The closed enum CORE uses to classify every fact in memory and route searches."
 ---
 
-## What Are Aspects?
+## What aspects are
 
-Every fact in your CORE memory is automatically classified into one of 11 aspects. Think of aspects as filing cabinet drawers - when you need something specific, CORE knows exactly which drawer to open.
+Aspects are a closed enum that classifies every fact stored in CORE memory. The search router uses them to filter results: a query is mapped to one or more aspects, and only statements tagged with those aspects are returned. The full set is defined as `StatementAspects` in `packages/types/src/graph/graph.entity.ts`.
 
-## The 11 Aspects
+## The 12 aspects
 
-| Aspect | What it captures | Example | When it surfaces |
-|--------|-----------------|---------|-----------------|
-| **Identity** | Who you are (slow-changing attributes) | "Manik works at Red Planet" | Understanding your role, company, or background |
-| **Knowledge** | What you know and understand | "Expert in TypeScript and React" | Explaining concepts or choosing complexity level |
-| **Belief** | Why you think that way | "Values simplicity over complexity in code" | Architectural decisions or design choices |
-| **Preference** | How you want things done | "Prefers pnpm over npm" | Code reviews, setup, choosing tools |
-| **Action** | What you actually do (habitual behaviors) | "Reviews PRs every morning before standup" | Suggesting workflows or understanding routines |
-| **Goal** | What you want to achieve | "Launch MVP by Q2 2026" | Planning features, prioritizing work |
-| **Directive** | Hard rules and automation triggers | "Always run tests before creating a PR" | **Always** - directives are enforced rules |
-| **Decision** | Past choices and their reasoning | "Chose Neo4j for graph storage because of relationship traversal performance" | Encountering similar technical choices |
-| **Event** | Things that happened (with timestamps) | "Started working on authentication refactor on Jan 15, 2026" | Temporal queries ("what happened", "when did we") |
-| **Problem** | Challenges, blockers, issues | "Hit rate limits with GitHub API when syncing 50+ repos" | Debugging similar issues or planning around constraints |
-| **Relationship** | Connections between people, teams, projects | "Works with Sarah on CORE project" | Understanding team dynamics or collaborators |
+| Aspect | Captures | Example statement | Used for |
+|--------|----------|-------------------|----------|
+| `Identity` | Who they are: role, location, affiliation (slow-changing) | "Manik works at Red Planet" | Role, company, background |
+| `Knowledge` | What they know: expertise, skills, understanding | "Expert in TypeScript and React" | Skill level, technical depth |
+| `Belief` | Why they think that way: values, opinions, reasoning | "Values simplicity over complexity in code" | Design and architectural reasoning |
+| `Preference` | How they want things: likes, dislikes, style choices | "Prefers pnpm over npm" | Tooling, style, setup choices |
+| `Habit` | What they do regularly: recurring behaviors, routines | "Reviews PRs every morning before standup" | Routines, recurring workflows |
+| `Goal` | What they want to achieve: future targets, aims | "Launch MVP by Q2 2026" | Planning, prioritization |
+| `Task` | One-time commitments: follow-ups, promises, action items | "Send the contract draft to Sarah by Friday" | Open action items, follow-ups |
+| `Directive` | Rules and automation: always do X, notify when Y, remind me to Z | "Always run tests before creating a PR" | Enforced rules and triggers |
+| `Decision` | Choices made, conclusions reached | "Chose Neo4j for graph storage because of traversal performance" | Past choices and their reasoning |
+| `Event` | Specific occurrences with timestamps | "Started auth refactor on Jan 15, 2026" | Temporal queries |
+| `Problem` | Blockers, issues, challenges | "Hit rate limits with GitHub API when syncing 50+ repos" | Debugging, constraint planning |
+| `Relationship` | Connections between people | "Works with Sarah on CORE project" | Team and collaborator graph |
 
-## Why Aspects Matter
+## Voice aspects vs graph aspects
 
-When you ask "What are my coding preferences?", CORE doesn't search through all your conversations. It:
+The 12 aspects are split into two storage paths, defined by the `VOICE_ASPECTS` subset in `packages/types/src/graph/graph.entity.ts`.
 
-1. Classifies your query as an **Aspect Query** for `Preference`
-2. Filters statements where `aspect = Preference`
-3. Returns only preference facts: "Prefers TypeScript", "Uses pnpm", "Avoids class components"
+Voice aspects (`Directive`, `Preference`, `Habit`, `Belief`, `Goal`, `Task`) represent the user's voice. They are stored as complete, non-decomposed statements in the Aspects Store. Queries scoped to these aspects return whole statements as written.
 
-**Result**: 5 precise facts in 300ms, instead of 50 maybe-relevant chunks in 2000ms.
+The other six (`Identity`, `Knowledge`, `Decision`, `Event`, `Problem`, `Relationship`) are graph aspects. They are decomposed into atomic subject, predicate, object triples in Neo4j. Queries scoped to these aspects return triples rather than full statements.
 
-## How They're Used Together
+## How aspects route searches
+
+The router's `extractAspects()` function classifies an incoming query and returns `aspects: string[]`, where each value is one of the 12 enum strings above. The `aspect_query` handler then scopes its graph traversal by those aspects plus any matched labels. Agents calling `memory_search` do not pass aspects directly: classification is performed internally by the router and handlers.
+
+## Aspect combinations by task
 
 | What the agent is doing | Aspects surfaced |
-|------------------------|------------------|
-| Writing code | Preference, Directive, Knowledge |
-| Code review | Preference, Directive |
-| Architectural decision | Decision, Belief, Problem |
-| Debugging | Problem, Knowledge, Decision |
-| Planning features | Goal, Decision, Directive |
-| Explaining concepts | Knowledge, Identity |
+|-------------------------|------------------|
+| Writing code | `Preference`, `Directive`, `Knowledge` |
+| Code review | `Preference`, `Directive` |
+| Architectural decision | `Decision`, `Belief`, `Problem` |
+| Debugging | `Problem`, `Knowledge`, `Decision` |
+| Planning features | `Goal`, `Decision`, `Directive` |
+| Tracking follow-ups | `Task`, `Directive`, `Goal` |
+| Explaining concepts | `Knowledge`, `Identity` |
