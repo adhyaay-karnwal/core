@@ -2,7 +2,8 @@ import { DailyWidgetGrid } from "./daily-widget-grid.client";
 import type { OverviewCell, WidgetOption } from "~/components/overview/types";
 
 interface Props {
-  initialCells: OverviewCell[];
+  /** `null` = layout never persisted (apply defaults). `[]` = user removed all. */
+  initialCells: OverviewCell[] | null;
   widgetOptions: WidgetOption[];
   onSave: (cells: OverviewCell[]) => void;
   widgetPat: string | null;

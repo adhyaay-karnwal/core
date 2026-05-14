@@ -121,3 +121,18 @@ export async function updateCodingSessionExternalId(
     data: { externalSessionId },
   });
 }
+
+export async function getCodingSessionForResume(
+  id: string,
+  workspaceId: string,
+) {
+  return prisma.codingSession.findFirst({
+    where: { id, workspaceId },
+    select: {
+      gatewayId: true,
+      agent: true,
+      dir: true,
+      externalSessionId: true,
+    },
+  });
+}

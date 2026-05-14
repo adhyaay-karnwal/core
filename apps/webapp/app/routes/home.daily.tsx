@@ -46,8 +46,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const workspaceId = workspace?.id ?? "";
 
   const workspaceMeta = (workspace?.metadata ?? {}) as Record<string, unknown>;
-  const dailyWidgetCells = (workspaceMeta.dailyWidgetLayout ??
-    []) as OverviewCell[];
+  // `null` distinguishes "never customized" (apply defaults client-side) from
+  // `[]` ("user removed everything"). Collapsing both into `[]` caused the
+  // default widgets to re-add themselves on every load.
+  const dailyWidgetCells =
+    "dailyWidgetLayout" in workspaceMeta
+      ? ((workspaceMeta.dailyWidgetLayout ?? []) as OverviewCell[])
+      : null;
 
   const [todayPage, widgetOptions, widgetPat] = await Promise.all([
     findOrCreateDailyPage(workspaceId, user.id, todayUTC),

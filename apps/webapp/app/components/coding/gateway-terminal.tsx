@@ -11,6 +11,10 @@ interface Props {
    *  externalSessionId and proxies the WS. */
   codingSessionId: string;
   onNewSession?: () => void;
+  /** Resume the same session (re-spawns the agent with `--resume <id>` on the
+   *  gateway). Caller is responsible for remounting after this resolves so the
+   *  WS attaches to the fresh PTY. */
+  onResumeSession?: () => void;
   /** If set, this text is typed into the terminal once on first connect. */
   initialPrompt?: string;
 }
@@ -43,7 +47,12 @@ function buildXtermUrl(codingSessionId: string): string {
   )}/xterm`;
 }
 
-export function GatewayTerminal({ codingSessionId, onNewSession, initialPrompt }: Props) {
+export function GatewayTerminal({
+  codingSessionId,
+  onNewSession,
+  onResumeSession,
+  initialPrompt,
+}: Props) {
   const theme = useHtmlTheme();
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<import("@xterm/xterm").Terminal | null>(null);
@@ -78,9 +87,10 @@ export function GatewayTerminal({ codingSessionId, onNewSession, initialPrompt }
     async function setup() {
       if (!containerRef.current) return;
 
-      const [{ Terminal }, { FitAddon }] = await Promise.all([
+      const [{ Terminal }, { FitAddon }, { WebglAddon }] = await Promise.all([
         import("@xterm/xterm"),
         import("@xterm/addon-fit"),
+        import("@xterm/addon-webgl"),
       ]);
       if (!mounted || !containerRef.current) return;
 
@@ -104,6 +114,14 @@ export function GatewayTerminal({ codingSessionId, onNewSession, initialPrompt }
       }
       localTerm = term;
       term.open(containerRef.current);
+
+      try {
+        const webglAddon = new WebglAddon();
+        webglAddon.onContextLoss(() => webglAddon.dispose());
+        term.loadAddon(webglAddon);
+      } catch {
+        // WebGL unavailable (e.g. headless/old GPU) — xterm falls back to DOM renderer.
+      }
 
       await document.fonts.ready;
       await new Promise<void>((resolve) => {
@@ -148,7 +166,9 @@ export function GatewayTerminal({ codingSessionId, onNewSession, initialPrompt }
             localStorage.setItem(sentKey, "1");
             setTimeout(() => {
               if (!mounted || ws.readyState !== WebSocket.OPEN) return;
-              ws.send(JSON.stringify({ kind: "input", data: initialPrompt + "\r" }));
+              ws.send(
+                JSON.stringify({ kind: "input", data: initialPrompt + "\r" }),
+              );
             }, 1000);
           }
         }
@@ -208,6 +228,18 @@ export function GatewayTerminal({ codingSessionId, onNewSession, initialPrompt }
         if (ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({ kind: "input", data: input }));
         }
+      });
+
+      term.attachCustomKeyEventHandler((e) => {
+        if (e.type !== "keydown") return true;
+        if (e.metaKey && e.key === "Backspace") {
+          e.preventDefault();
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ kind: "input", data: "\x15" }));
+          }
+          return false;
+        }
+        return true;
       });
 
       let rafId: number | null = null;
@@ -326,11 +358,18 @@ export function GatewayTerminal({ codingSessionId, onNewSession, initialPrompt }
           >
             Session ended
           </p>
-          {onNewSession ? (
-            <Button variant="secondary" onClick={onNewSession}>
-              New session
-            </Button>
-          ) : null}
+          <div className="flex items-center gap-2">
+            {onResumeSession ? (
+              <Button variant="ghost" onClick={onResumeSession}>
+                Resume session
+              </Button>
+            ) : null}
+            {onNewSession ? (
+              <Button variant="secondary" onClick={onNewSession}>
+                New session
+              </Button>
+            ) : null}
+          </div>
         </div>
       )}
     </div>

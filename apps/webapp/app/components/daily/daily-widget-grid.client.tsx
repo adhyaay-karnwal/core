@@ -8,6 +8,7 @@ import {
   LayoutGrid,
   Plug,
   Plus,
+  Terminal,
   X,
 } from "lucide-react";
 import {
@@ -17,12 +18,14 @@ import {
   DialogTitle,
 } from "~/components/ui/dialog";
 import { NeedsAttentionWidget } from "./needs-attention-widget.client";
+import { CodingSessionsWidget } from "./coding-sessions-widget.client";
 import { getIcon, type IconType } from "~/components/icon-utils";
 
 interface NativeWidget {
   widgetSlug: string;
   widgetName: string;
   widgetDescription: string;
+  icon: typeof AlertCircle;
 }
 
 const NATIVE_WIDGETS: NativeWidget[] = [
@@ -30,6 +33,13 @@ const NATIVE_WIDGETS: NativeWidget[] = [
     widgetSlug: "needs-attention",
     widgetName: "Needs Attention",
     widgetDescription: "Waiting tasks that need your attention",
+    icon: AlertCircle,
+  },
+  {
+    widgetSlug: "coding-sessions",
+    widgetName: "Coding sessions",
+    widgetDescription: "Live status of your recent coding sessions",
+    icon: Terminal,
   },
 ];
 
@@ -49,10 +59,22 @@ const DEFAULT_CELLS: OverviewCell[] = [
     integrationAccountId: null,
     config: null,
   },
+  {
+    id: "default-coding-sessions",
+    x: 0,
+    y: 1,
+    w: 1,
+    h: 1,
+    widgetSlug: "coding-sessions",
+    integrationSlug: null,
+    integrationAccountId: null,
+    config: null,
+  },
 ];
 
 interface Props {
-  initialCells: OverviewCell[];
+  /** `null` = layout never persisted (apply defaults). `[]` = user removed all. */
+  initialCells: OverviewCell[] | null;
   widgetOptions: WidgetOption[];
   onSave: (cells: OverviewCell[]) => void;
   widgetPat: string | null;
@@ -80,23 +102,26 @@ function DailyWidgetPicker({
         </DialogHeader>
         <div className="space-y-1">
           {/* Native built-in widgets */}
-          {NATIVE_WIDGETS.map((nw) => (
-            <button
-              key={nw.widgetSlug}
-              onClick={() => onSelect(nw)}
-              className="hover:bg-grayAlpha-100 flex w-full items-center gap-3 rounded-md p-3 text-left transition-colors"
-            >
-              <div className="bg-grayAlpha-100 flex h-7 w-7 items-center justify-center rounded">
-                <AlertCircle size={14} className="text-muted-foreground" />
-              </div>
-              <div>
-                <p className="text-sm font-medium">{nw.widgetName}</p>
-                <p className="text-muted-foreground text-xs">
-                  {nw.widgetDescription}
-                </p>
-              </div>
-            </button>
-          ))}
+          {NATIVE_WIDGETS.map((nw) => {
+            const NwIcon = nw.icon;
+            return (
+              <button
+                key={nw.widgetSlug}
+                onClick={() => onSelect(nw)}
+                className="hover:bg-grayAlpha-100 flex w-full items-center gap-3 rounded-md p-3 text-left transition-colors"
+              >
+                <div className="bg-grayAlpha-100 flex h-7 w-7 items-center justify-center rounded">
+                  <NwIcon size={14} className="text-muted-foreground" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium">{nw.widgetName}</p>
+                  <p className="text-muted-foreground text-xs">
+                    {nw.widgetDescription}
+                  </p>
+                </div>
+              </button>
+            );
+          })}
 
           {/* Integration widgets */}
           {widgetOptions.length > 0 && (
@@ -155,7 +180,7 @@ export function DailyWidgetGrid({
   baseUrl,
 }: Props) {
   const [cells, setCells] = useState<OverviewCell[]>(
-    initialCells.length > 0 ? initialCells : DEFAULT_CELLS,
+    initialCells === null ? DEFAULT_CELLS : initialCells,
   );
   const [pickerOpen, setPickerOpen] = useState(false);
   const [selectedCellId, setSelectedCellId] = useState<string | null>(null);
@@ -307,6 +332,8 @@ export function DailyWidgetGrid({
             <div className="w-full">
               {isNative && cell.widgetSlug === "needs-attention" ? (
                 <NeedsAttentionWidget />
+              ) : isNative && cell.widgetSlug === "coding-sessions" ? (
+                <CodingSessionsWidget />
               ) : integrationOption && widgetPat ? (
                 <WidgetCell
                   widgetSlug={integrationOption.widgetSlug}

@@ -214,13 +214,13 @@ export const codingTools: GatewayTool[] = [
 	{
 		name: 'coding_read_session',
 		description:
-			'Read conversation turns (user/assistant messages) from a coding session. Returns structured turns instead of raw log lines. The `status` field is one of: "initializing" (agent booting, transcript not yet written), "running" (agent process alive and writing), "completed" (process exited with a transcript), "failed" (process exited without any transcript).',
+			'Read conversation turns (user/assistant messages) from a coding session. Returns structured turns and a status describing what the agent is doing. The `status` field is one of: "initializing" (agent booting, transcript not yet written), "working" (process alive AND the assistant is still responding to the most recent user turn — keep polling), "idle" (process alive AND the last turn is from the assistant, so the conversation is paused until the next user message), "ended" (process has exited with a transcript), "failed" (process exited without any transcript). The `statusMessage` field is a human-readable explanation of the same state intended for meta-agents.',
 		inputSchema: jsonSchemas.coding_read_session!,
 	},
 	{
 		name: 'coding_list_sessions',
 		description:
-			"List all coding sessions from Claude's session history. Sorted by most recent. Supports date filtering.",
+			"List all coding sessions from disk-resident agent histories (claude-code, codex-cli). Sorted by most recent first; supports date filtering. Each row includes `status` and `statusMessage` using the same vocabulary as `coding_read_session`: \"working\" (process alive, assistant is still responding to the last user turn), \"idle\" (process alive, last turn is assistant — paused for user), \"ended\" (process gone), or \"initializing\" (process alive but transcript not yet readable).",
 		inputSchema: jsonSchemas.coding_list_sessions!,
 	},
 	{
@@ -803,7 +803,26 @@ async function handleReadSession(params: zod.infer<typeof ReadSessionSchema>) {
 		status = 'initializing';
 		statusMessage = 'Agent is booting. Wait a few seconds and read again.';
 	} else if (running) {
-		status = 'running';
+		// Process is alive and the transcript exists. Distinguish "working" (the
+		// agent is producing the answer to the most recent user turn) from "idle"
+		// (the last turn is the assistant's, so the conversation is paused until
+		// the user speaks again). Surfaced as descriptive text so meta-agents can
+		// decide whether to poll more or act on the answer.
+		const lastTurn = turns.length > 0 ? turns[turns.length - 1] : undefined;
+		if (lastTurn?.role === 'user') {
+			status = 'working';
+			statusMessage =
+				'Working — assistant is still responding to the most recent user message. Poll again before acting on the output.';
+		} else if (lastTurn?.role === 'assistant') {
+			status = 'idle';
+			statusMessage =
+				'Idle — assistant turn is complete. Session is alive and waiting for the next user message.';
+		} else {
+			// No turns parsed yet despite the file existing — treat like initializing.
+			status = 'initializing';
+			statusMessage =
+				'Agent has started writing the transcript but no turns are parseable yet. Wait and read again.';
+		}
 	} else if (!fileExists && stored?.startedAt) {
 		// Process is gone and produced no transcript. Don't lie with "completed".
 		if (stored) deleteSession(params.sessionId);
@@ -818,7 +837,9 @@ async function handleReadSession(params: zod.infer<typeof ReadSessionSchema>) {
 	} else {
 		// Process finished — clean up running session record
 		if (stored) deleteSession(params.sessionId);
-		status = 'completed';
+		status = 'ended';
+		statusMessage =
+			'Ended — agent process has exited. The transcript is final; resume with `coding_ask` (passing sessionId) to continue.';
 	}
 
 	return {
@@ -852,19 +873,63 @@ async function handleListSessions(
 
 	const runningIds = new Set(listRunningSessions().map(s => s.sessionId));
 
-	return {
-		success: true,
-		result: {
-			sessions: sessions.map(s => ({
+	// For running sessions only, peek at the last turn to distinguish
+	// "working" (assistant is still responding) from "idle" (assistant turn
+	// is done). Ended sessions skip the I/O. Same vocabulary as
+	// `coding_read_session` so meta-agents can rely on a single taxonomy.
+	const enriched = await Promise.all(
+		sessions.map(async s => {
+			const running = runningIds.has(s.sessionId);
+			let status: 'working' | 'idle' | 'ended' | 'initializing';
+			let statusMessage: string;
+			if (!running) {
+				status = 'ended';
+				statusMessage =
+					'Ended — agent process has exited. Resume with `coding_ask` (passing sessionId) to continue.';
+			} else {
+				// readJsonlLines reads the whole file regardless of `tail`, then slices.
+				// Pull 50 tail entries so the user/assistant filter still leaves us at
+				// least one real turn even when the file ends with system/summary rows.
+				const {turns} = await readAgentSessionTurns(
+					s.agent,
+					s.dir,
+					s.sessionId,
+					{tail: true, lines: 50},
+				);
+				const lastTurn = turns.length > 0 ? turns[turns.length - 1] : undefined;
+				if (lastTurn?.role === 'user') {
+					status = 'working';
+					statusMessage =
+						'Working — assistant is still responding to the most recent user message.';
+				} else if (lastTurn?.role === 'assistant') {
+					status = 'idle';
+					statusMessage =
+						'Idle — assistant turn is complete. Session is alive and waiting for the next user message.';
+				} else {
+					status = 'initializing';
+					statusMessage =
+						'Initializing — agent is booting, transcript not yet readable.';
+				}
+			}
+			return {
 				sessionId: s.sessionId,
 				agent: s.agent,
 				dir: s.dir,
 				title: s.title,
-				running: runningIds.has(s.sessionId),
+				running,
+				status,
+				statusMessage,
 				createdAt: new Date(s.createdAt).toISOString(),
 				updatedAt: new Date(s.updatedAt).toISOString(),
 				fileSizeBytes: s.fileSizeBytes,
-			})),
+			};
+		}),
+	);
+
+	return {
+		success: true,
+		result: {
+			sessions: enriched,
 			total,
 			hasMore,
 			offset: params.offset ?? 0,

@@ -125,7 +125,14 @@ async function runReadSession(opts: zod.infer<typeof options>): Promise<void> {
 	const res = await readOnce();
 	if (!res) return;
 
-	const statusColor = res.status === 'running' ? chalk.blue : res.status === 'completed' ? chalk.green : chalk.red;
+	const statusColor =
+		res.status === 'working'
+			? chalk.yellow
+			: res.status === 'idle'
+				? chalk.blue
+				: res.status === 'ended'
+					? chalk.green
+					: chalk.red;
 
 	console.log(chalk.dim(`--- Session ${res.sessionId.slice(0, 8)} | ${statusColor(res.status)} ---`));
 	console.log(chalk.dim(`Turns: ${res.turns.length} | Size: ${res.fileSizeHuman} | Dir: ${res.dir}`));

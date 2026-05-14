@@ -93,9 +93,10 @@ export function XtermPane({
     async function setup() {
       if (!containerRef.current) return;
 
-      const [{ Terminal }, { FitAddon }] = await Promise.all([
+      const [{ Terminal }, { FitAddon }, { WebglAddon }] = await Promise.all([
         import("@xterm/xterm"),
         import("@xterm/addon-fit"),
+        import("@xterm/addon-webgl"),
       ]);
       if (!mounted || !containerRef.current) return;
 
@@ -119,6 +120,14 @@ export function XtermPane({
       }
       localTerm = term;
       term.open(containerRef.current);
+
+      try {
+        const webglAddon = new WebglAddon();
+        webglAddon.onContextLoss(() => webglAddon.dispose());
+        term.loadAddon(webglAddon);
+      } catch {
+        // WebGL unavailable (e.g. headless/old GPU) — xterm falls back to DOM renderer.
+      }
 
       await document.fonts.ready;
       await new Promise<void>((resolve) => {
@@ -211,6 +220,18 @@ export function XtermPane({
         if (ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({ kind: "input", data: input }));
         }
+      });
+
+      term.attachCustomKeyEventHandler((e) => {
+        if (e.type !== "keydown") return true;
+        if (e.metaKey && e.key === "Backspace") {
+          e.preventDefault();
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ kind: "input", data: "\x15" }));
+          }
+          return false;
+        }
+        return true;
       });
 
       let rafId: number | null = null;

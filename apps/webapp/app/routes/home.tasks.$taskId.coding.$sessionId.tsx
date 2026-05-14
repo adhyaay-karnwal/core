@@ -9,6 +9,7 @@ import type { CodingSessionListItem } from "~/services/coding/coding-session.ser
 import { Button } from "~/components/ui/button";
 import { Badge } from "~/components/ui/badge";
 import { GatewayTerminal } from "~/components/coding/gateway-terminal";
+import { toast } from "~/hooks/use-toast";
 import type { CodingOutletContext } from "./home.tasks.$taskId.coding";
 import { lastSessionStorageKey } from "./home.tasks.$taskId.coding._index";
 
@@ -193,6 +194,57 @@ function SessionDetail({ session }: { session: CodingSessionListItem }) {
   );
 }
 
+function ResumableGatewayTerminal({
+  session,
+  onNewSession,
+}: {
+  session: CodingSessionListItem;
+  onNewSession: () => void;
+}) {
+  // Bumped after a successful /resume so GatewayTerminal remounts and the
+  // xterm WS attaches to the freshly-spawned PTY.
+  const [resumeNonce, setResumeNonce] = useState(0);
+  const [resuming, setResuming] = useState(false);
+
+  const handleResume = useCallback(async () => {
+    if (resuming) return;
+    setResuming(true);
+    try {
+      const res = await fetch(
+        `/api/v1/coding-sessions/${session.id}/resume`,
+        { method: "POST" },
+      );
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as {
+          error?: string;
+        };
+        throw new Error(
+          body.error ?? `Resume failed (${res.status})`,
+        );
+      }
+      setResumeNonce((n) => n + 1);
+    } catch (err) {
+      toast({
+        title: "Couldn't resume session",
+        description: err instanceof Error ? err.message : String(err),
+        variant: "destructive",
+      });
+    } finally {
+      setResuming(false);
+    }
+  }, [resuming, session.id]);
+
+  return (
+    <GatewayTerminal
+      key={`${session.id}:${resumeNonce}`}
+      codingSessionId={session.id}
+      onNewSession={onNewSession}
+      onResumeSession={handleResume}
+      initialPrompt={session.prompt ?? undefined}
+    />
+  );
+}
+
 export default function CodingSessionRoute() {
   const { sessions, taskId, openNewSession } =
     useOutletContext<CodingOutletContext>();
@@ -233,11 +285,9 @@ export default function CodingSessionRoute() {
 
   if (showTerminal) {
     return (
-      <GatewayTerminal
-        key={session.id}
-        codingSessionId={session.id}
+      <ResumableGatewayTerminal
+        session={session}
         onNewSession={openNewSession}
-        initialPrompt={session.prompt ?? undefined}
       />
     );
   }
